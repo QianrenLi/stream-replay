@@ -7,6 +7,7 @@ mod ipc;
 mod tx_part_ctl;
 mod link;
 mod statistic;
+mod utils;
 
 use std::collections::HashMap;
 use std::path::Path;

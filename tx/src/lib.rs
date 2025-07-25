@@ -4,6 +4,7 @@ mod dispatcher;
 mod rtt;
 mod tx_part_ctl;
 mod statistic;
+mod utils;
 
 pub mod conf;
 pub mod link;

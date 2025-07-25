@@ -16,6 +16,7 @@ use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
 use crate::tx_part_ctl::TxPartCtler;
+use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
 type GuardedTxPartCtler = Arc<Mutex<TxPartCtler>>;
@@ -95,6 +96,106 @@ pub fn stream_thread(throttler:GuardedThrottler, tx_part_ctler:GuardedTxPartCtle
     //reset throttler
     throttler.lock().unwrap().reset();
 }
+
+
+pub fn video_thread(throttler:GuardedThrottler, tx_part_ctler:GuardedTxPartCtler, rtt_tx: Option<RttSender>,
+    params: ConnParams, socket_infos:SokcetInfo)
+{
+    let trace: Vec<(u64, Vec<u8>)> = read_packets(&params.npy_file).expect("loading failed.");
+    let (start_offset, duration) = (params.start_offset, params.duration);
+    let mut template = PacketStruct::new(params.port);
+    let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
+                        .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
+
+    let mut loops = 0;
+    let mut idx = start_offset;
+    let stop_time  = SystemTime::now().checked_add( Duration::from_secs_f64(duration[1]) ).unwrap();
+
+    spin_sleeper.sleep( Duration::from_secs_f64(duration[0]) );
+    while SystemTime::now() <= stop_time {
+        loops += 1;
+
+        let deadline = if loops < params.loops {
+            // 0. next iteration
+            idx = (idx + 1) % trace.len();
+            let interval_ns = trace[idx].0;
+            let size_bytes = trace[idx].1.len();
+            
+            // 1. generate packets
+            let mut packets = Vec::new();
+            let (_num, _remains) = (size_bytes/MAX_PAYLOAD_LEN, size_bytes%MAX_PAYLOAD_LEN);
+            let num = _num + if _remains > 0 { 1 } else { 0 };
+            template.next_seq(_num, _remains);
+
+            let mut packet_states: Vec<Vec<(u16, PacketType)>> = tx_part_ctler.lock().unwrap().get_packet_states(num);
+            let mut rng = thread_rng();
+            packet_states.shuffle(&mut rng);
+
+            for packet_state in packet_states {
+                for (offset, packet_type) in packet_state {
+                    let length = if offset == (num - 1) as u16 {
+                        _remains as u16
+                    } else {
+                        MAX_PAYLOAD_LEN as u16
+                    };
+    
+                    template.set_length(length);
+                    template.set_offset(offset);
+                    template.set_indicator(packet_type);
+                    template.set_payload(&trace[idx].1[
+                        (offset as usize * MAX_PAYLOAD_LEN) ..
+                        (offset as usize * MAX_PAYLOAD_LEN) + length as usize
+                    ]);
+    
+                    packets.push(template.clone());
+                }
+            }
+            // 2. append to application-layer queue
+            throttler.lock().unwrap().prepare( packets );
+            // report RTT
+            if let Some(ref r_tx) = rtt_tx {
+                r_tx.send(template.seq).unwrap();
+            }
+
+            SystemTime::now() + Duration::from_nanos(interval_ns)
+        }
+        else {
+            stop_time
+        };
+        
+        
+        trace!("Source: Time {} -> seq {}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(), template.seq as u32);
+        // 3. process queue, aware of blocked status
+        while SystemTime::now() < deadline {
+            match throttler.lock().unwrap().try_consume(|mut packet| {
+                let time_now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
+                packet.timestamp = time_now;
+                match tx_part_ctler.lock() {
+                    Ok(controller) => {
+                        let ip_addr = controller.packet_to_ipaddr(packet.indicators.clone());
+                        if let Some(sender) = socket_infos.get(&ip_addr) {
+                            let _ = sender.try_send(packet);
+                        }
+                    }
+                    Err(_) => (),
+                }
+                true
+            }) {
+                Some(_) => continue,
+                None=> break
+            }
+        }
+
+        // 4. sleep until next arrival
+        if let Ok(remaining_time) = deadline.duration_since( SystemTime::now() ) {
+            spin_sleeper.sleep( remaining_time );
+        }
+    }
+
+    //reset throttler
+    throttler.lock().unwrap().reset();
+}
+
 
 pub fn source_thread(throttler:GuardedThrottler, tx_part_ctler:GuardedTxPartCtler, rtt_tx: Option<RttSender>,
     params: ConnParams, socket_infos:SokcetInfo)
@@ -302,7 +403,11 @@ impl SourceManager {
             if params.npy_file.starts_with(STREAM_PROTO) {
                 let dest = dest.unwrap();
                 stream_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos, dest)
-            } else {
+            }
+            else if params.npy_file.ends_with(".bin") {
+                video_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos);
+            }
+            else {
                 source_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos);
             }
         });

@@ -68,7 +68,7 @@ fn handle_rtt(
     data: &mut RecvData, 
     pong_socket: &UdpSocket, 
     src_addr: &std::net::SocketAddr
-) -> Option<Vec<u8>> {
+) -> Option<()> {
     let seq = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
     data.last_seq = if seq > data.last_seq { seq } else { data.last_seq };
 
@@ -78,7 +78,6 @@ fn handle_rtt(
 
     data.recv_records.entry(seq).or_insert_with(RecvRecord::new).record(buffer);
     let _record = data.recv_records.get_mut(&seq).unwrap();
-    let mut res = None;
 
     if _record.is_fst_ack() || _record.is_scd_ack() {
         let packet_type = if src_addr.ip().to_string() == args.src_ipaddrs[0] {
@@ -105,17 +104,17 @@ fn handle_rtt(
 
     if _record.is_complete() {
         data.stutter.update( std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() );
-        if args.rx_mode {
-            res = Some(_record.gather());
+        if args.rx_mode && data.tx.is_some() {
+            let res = _record.gather();
             if let Some(ref tx) = data.tx {
-                tx.send(res.clone().unwrap()).unwrap();
+                tx.send(res).unwrap();
             }
         }
         data.recv_records.remove(&seq);
         data.recevied += 1;
     }
     
-    res
+    None
 }
 
 fn send_ack(pong_socket: &UdpSocket, buffer: &[u8], ping_addr: &str) {
