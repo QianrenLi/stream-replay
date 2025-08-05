@@ -1,6 +1,7 @@
 mod destination;
 mod record;
 mod statistic;
+mod forward;
 
 use std::{fs::File, io::Write, sync::{mpsc, Arc, Mutex}};
 use clap::Parser;
@@ -24,6 +25,12 @@ fn main() {
     let lock = Arc::new(Mutex::new(false));
     let lock_clone = Arc::clone(&lock);
     
+    if args.rx_mode{
+        std::thread::spawn(move || {
+            forward::forward_thread(args.forward_port.clone(), _rx);
+        });
+    }
+
     std::thread::spawn(move || {
         recv_thread(args, recv_data, lock_clone);
     });

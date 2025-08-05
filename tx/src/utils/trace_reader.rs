@@ -9,10 +9,12 @@ pub fn read_packets(packets_file: &str) -> io::Result<Vec<(u64, Vec<u8>)>> {
     loop {
         // Read metadata (interval_ns and data length)
         let mut metadata = [0u8; 16]; // 16 bytes for two u64 values
-        let bytes_read = file.read(&mut metadata)?;
-
-        if bytes_read == 0 {
-            break; // End of file
+        if let Err(e) = file.read_exact(&mut metadata) {
+            if e.kind() == io::ErrorKind::UnexpectedEof {
+                break; // Clean EOF
+            } else {
+                return Err(e);
+            }
         }
 
         // Unpack the metadata: the first 8 bytes are interval_ns, the next 8 bytes are data_length

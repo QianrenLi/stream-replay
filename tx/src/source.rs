@@ -116,8 +116,6 @@ pub fn video_thread(throttler:GuardedThrottler, tx_part_ctler:GuardedTxPartCtler
         loops += 1;
 
         let deadline = if loops < params.loops {
-            // 0. next iteration
-            idx = (idx + 1) % trace.len();
             let interval_ns = trace[idx].0;
             let size_bytes = trace[idx].1.len();
             
@@ -156,6 +154,9 @@ pub fn video_thread(throttler:GuardedThrottler, tx_part_ctler:GuardedTxPartCtler
             if let Some(ref r_tx) = rtt_tx {
                 r_tx.send(template.seq).unwrap();
             }
+
+            // 3. next iteration
+            idx = (idx + 1) % trace.len();
 
             SystemTime::now() + Duration::from_nanos(interval_ns)
         }

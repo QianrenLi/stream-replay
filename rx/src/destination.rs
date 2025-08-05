@@ -23,6 +23,8 @@ pub struct Args {
     pub sample_rate: u32,
     #[clap(long)]
     pub src_ipaddrs: Vec<String>,
+    #[clap(long, default_value_t = 5005)]
+    pub forward_port: u16,
 }
 
 pub fn recv_thread(args: Args, recv_params: Arc<Mutex<RecvData>>, lock: Arc<Mutex<bool>>){
