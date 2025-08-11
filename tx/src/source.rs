@@ -21,7 +21,7 @@ use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
 type GuardedTxPartCtler = Arc<Mutex<TxPartCtler>>;
-pub type SokcetInfo = HashMap<String, (UdpSocket, String)>;
+pub type SocketInfo = HashMap<String, (UdpSocket, String)>;
 
 pub const STREAM_PROTO: &str = "stream://";
 
@@ -60,46 +60,48 @@ fn generate_packets(
 fn process_queue(
     throttler: &GuardedThrottler, 
     tx_part_ctler: &GuardedTxPartCtler, 
-    socket_infos: &SokcetInfo, 
+    socket_infos: &SocketInfo, 
     stop_time: &SystemTime
 ) {
+    // Precompute unix epoch once
+    let unix_epoch = SystemTime::UNIX_EPOCH;
+    
     while SystemTime::now() < *stop_time {
+        // Compute current time once per iteration
+        let now = SystemTime::now();
+        let timestamp = now.duration_since(unix_epoch).unwrap().as_secs_f64();
+
         if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
-            packet.timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
-            match tx_part_ctler.lock() {
-                Ok(controller) => {
-                    let ip_addr = controller.packet_to_ipaddr(packet.indicators.clone());
-                    
-                    if let Some(sender) = socket_infos.get(&ip_addr) {
-                        let length = APP_HEADER_LENGTH + packet.length as usize;
-                        let buf = unsafe { any_as_u8_slice(&packet) };
-                        let rx_addr = format!("{}:{}", sender.1, packet.port as usize);
-                        
-                        match sender.0.send_to(&buf[..length], &rx_addr) {
-                            Ok(_len) => {
-                                // Packet sent successfully, nothing to change here.
-                            }
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                // If the socket is not ready, we don't consume the packet
-                                // and continue retrying later
-                                return false;
-                            }
-                            Err(e) => {
-                                // If an error occurs, panic (as per the original behavior)
-                                panic!("encountered IO error: {e}");
-                            }
-                        }
-                    } else {
-                        return false; // Return false if the sender is not found
-                    }
-                }
-                Err(_) => {
-                    return false; // Return false if we fail to lock tx_part_ctler
-                }
+            packet.timestamp = timestamp;
+
+            // Get IP address with minimal lock time
+            let ip_addr = {
+                let controller = match tx_part_ctler.lock() {
+                    Ok(c) => c,
+                    Err(_) => return false,
+                };
+                controller.packet_to_ipaddr(packet.indicators.clone())
+            };
+
+            // Lookup socket without holding controller lock
+            let sender = match socket_infos.get(&ip_addr) {
+                Some(s) => s,
+                None => return false,
+            };
+
+            // Prepare send parameters outside match
+            let length = APP_HEADER_LENGTH + packet.length as usize;
+            let buf = unsafe { any_as_u8_slice(&packet) };
+            let rx_addr = format!("{}:{}", sender.1, packet.port as usize);
+            
+            // Attempt to send
+            match sender.0.send_to(&buf[..length], &rx_addr) {
+                Ok(_) => true,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
+                Err(e) => false,
             }
-            true // Successfully processed and consumed the packet
         }) {
-            continue;
+            // Continue processing next packet
         } else {
             break;
         }
@@ -111,7 +113,7 @@ pub fn stream_thread(
     tx_part_ctler: GuardedTxPartCtler, 
     rtt_tx: Option<RttSender>, 
     params: ConnParams, 
-    socket_infos: SokcetInfo, 
+    socket_infos: SocketInfo, 
     dest: BufferReceiver
 ) {
     let mut template = PacketStruct::new(params.port);
@@ -149,7 +151,7 @@ pub fn video_thread(
     tx_part_ctler: GuardedTxPartCtler, 
     rtt_tx: Option<RttSender>, 
     params: ConnParams, 
-    socket_infos: SokcetInfo
+    socket_infos: SocketInfo
 ) {
     let trace: Vec<(u64, Vec<u8>)> = read_packets(&params.npy_file).expect("loading failed.");
     let (start_offset, duration) = (params.start_offset, params.duration);
@@ -207,7 +209,7 @@ pub fn source_thread(
     tx_part_ctler: GuardedTxPartCtler, 
     rtt_tx: Option<RttSender>, 
     params: ConnParams, 
-    socket_infos: SokcetInfo
+    socket_infos: SocketInfo
 ) {
     let trace: Array2<u64> = read_npy(&params.npy_file).expect("loading failed.");
     let (start_offset, duration) = (params.start_offset, params.duration);
@@ -276,7 +278,7 @@ pub struct SourceManager{
     rtt: Option<RttRecorder>,
     tx_part_ctler: Arc<Mutex<TxPartCtler>>,
     //
-    socket_infos: Vec<SokcetInfo>,
+    socket_infos: Vec<SocketInfo>,
 }
 
 impl SourceManager {

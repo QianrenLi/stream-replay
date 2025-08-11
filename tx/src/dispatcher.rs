@@ -5,13 +5,13 @@ use std::time::{Duration, SystemTime};
 use log::trace;
 
 use crate::link::Link;
-use crate::source::SokcetInfo;
+use crate::source::SocketInfo;
 
 use core::packet::{self, any_as_u8_slice, PacketReceiver, PacketStruct, APP_HEADER_LENGTH};
 use core::socket::{*};
 use std::net::UdpSocket;
 
-pub fn dispatch(links: Vec<Link>, tos:u8) -> SokcetInfo {
+pub fn dispatch(links: Vec<Link>, tos:u8) -> SocketInfo {
     // create Hashmap for each tx_ipaddr and set each non blocking
     let mut socket_infos = HashMap::new();
 
