@@ -70,25 +70,34 @@ fn process_queue(
                 Ok(controller) => {
                     let ip_addr = controller.packet_to_ipaddr(packet.indicators.clone());
                     
-                    if let Some(sender)= socket_infos.get(&ip_addr) {
+                    if let Some(sender) = socket_infos.get(&ip_addr) {
                         let length = APP_HEADER_LENGTH + packet.length as usize;
-                        let buf = unsafe{ any_as_u8_slice(&packet) };
+                        let buf = unsafe { any_as_u8_slice(&packet) };
                         let rx_addr = format!("{}:{}", sender.1, packet.port as usize);
+                        
                         match sender.0.send_to(&buf[..length], &rx_addr) {
                             Ok(_len) => {
-                                // break
+                                // Packet sent successfully, nothing to change here.
                             }
                             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                // trace!("socket to {} is not ready, retry later.", &rx_addr);
-                                // throttler.lock().unwrap().(packet);
+                                // If the socket is not ready, we don't consume the packet
+                                // and continue retrying later
+                                return false;
                             }
-                            Err(e) => panic!("encountered IO error: {e}")
+                            Err(e) => {
+                                // If an error occurs, panic (as per the original behavior)
+                                panic!("encountered IO error: {e}");
+                            }
                         }
+                    } else {
+                        return false; // Return false if the sender is not found
                     }
                 }
-                Err(_) => (),
+                Err(_) => {
+                    return false; // Return false if we fail to lock tx_part_ctler
+                }
             }
-            true
+            true // Successfully processed and consumed the packet
         }) {
             continue;
         } else {
