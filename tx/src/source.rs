@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use ndarray::prelude::*;
 use ndarray_npy::read_npy;
 use log::trace;
@@ -20,7 +21,7 @@ use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
 type GuardedTxPartCtler = Arc<Mutex<TxPartCtler>>;
-type SokcetInfo = HashMap<String, flume::Sender<PacketStruct>>;
+pub type SokcetInfo = HashMap<String, (UdpSocket, String)>;
 
 pub const STREAM_PROTO: &str = "stream://";
 
@@ -68,8 +69,21 @@ fn process_queue(
             match tx_part_ctler.lock() {
                 Ok(controller) => {
                     let ip_addr = controller.packet_to_ipaddr(packet.indicators.clone());
-                    if let Some(sender) = socket_infos.get(&ip_addr) {
-                        let _ = sender.try_send(packet);
+                    
+                    if let Some(sender)= socket_infos.get(&ip_addr) {
+                        let length = APP_HEADER_LENGTH + packet.length as usize;
+                        let buf = unsafe{ any_as_u8_slice(&packet) };
+                        let rx_addr = format!("{}:{}", sender.1, packet.port as usize);
+                        match sender.0.send_to(&buf[..length], &rx_addr) {
+                            Ok(_len) => {
+                                // break
+                            }
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                // trace!("socket to {} is not ready, retry later.", &rx_addr);
+                                // throttler.lock().unwrap().(packet);
+                            }
+                            Err(e) => panic!("encountered IO error: {e}")
+                        }
                     }
                 }
                 Err(_) => (),

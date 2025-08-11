@@ -5,29 +5,23 @@ use std::time::{Duration, SystemTime};
 use log::trace;
 
 use crate::link::Link;
+use crate::source::SokcetInfo;
 
 use core::packet::{self, any_as_u8_slice, PacketReceiver, PacketStruct, APP_HEADER_LENGTH};
 use core::socket::{*};
 use std::net::UdpSocket;
 
-pub fn dispatch(links: Vec<Link>, tos:u8) -> HashMap<String, flume::Sender<PacketStruct>> {
+pub fn dispatch(links: Vec<Link>, tos:u8) -> SokcetInfo {
     // create Hashmap for each tx_ipaddr and set each non blocking
     let mut socket_infos = HashMap::new();
 
-    let mut handles = Vec::new();
     for link in links.iter() {
         let tx_ipaddr = link.tx_ipaddr.clone();
-        let rx_addr =  format!("{}:0",link.rx_ipaddr.clone()).to_socket_addrs().unwrap().next().unwrap();
+        let rx_addr =  format!("{}",link.rx_ipaddr.clone());
         let socket = create_udp_socket(tos, tx_ipaddr.clone());
-        let (socket_tx, socket_rx) = flume::bounded::<PacketStruct>(50000);
         if let Some(socket) = socket {
             socket.set_nonblocking(true).unwrap();
-            socket_infos.insert(tx_ipaddr.clone(),  socket_tx );
-            let _handle = thread::spawn(move || {
-                let socket = socket.try_clone().unwrap();
-                socket_thread(socket, socket_rx, rx_addr);
-            });
-            handles.push(_handle);
+            socket_infos.insert(tx_ipaddr.clone(),  (socket, rx_addr));
         }
         else{
             eprintln!("Socket creation failure: ip_addr {} tos {}.", tx_ipaddr, tos);
