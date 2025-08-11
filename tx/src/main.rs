@@ -23,6 +23,7 @@ use serde_json;
 use crate::conf::Manifest;
 use crate::ipc::IPCDaemon;
 use crate::source::SourceManager;
+use crate::statistic::mac_queue::{mon_mac_thread, MACQueueMonitor};
 
 
 #[derive(Parser, Debug)]
@@ -37,6 +38,9 @@ struct ProgArgs {
     /// IPC Port for real-time access
     #[clap(long, default_value_t = 11112)]
     ipc_port: u16,
+    /// Start the MAC queue monitor or not
+    #[clap(long, action)]
+    mon_mac: bool,
 }
 
 fn main() {
@@ -44,7 +48,6 @@ fn main() {
     // load the manifest file
     let args = ProgArgs::parse();
     info!{"Starting Transmitting as time {}.", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64()};
-    // let tx_ipaddr = args.tx_ip_address;
     let file = std::fs::File::open(&args.manifest_file).unwrap();
     let reader = std::io::BufReader::new( file );
     let root = Path::new(&args.manifest_file).parent();
@@ -53,6 +56,10 @@ fn main() {
     let streams:Vec<_> = manifest.streams.into_iter().filter_map( |x| x.validate(root, args.duration) ).collect();
     let window_size = manifest.window_size;
     println!("Sliding Window Size: {}.", window_size);
+
+    if args.mon_mac {
+        mon_mac_thread(MACQueueMonitor::new(&manifest.tx_ipaddrs));
+    }
 
     // spawn the source thread
     let mut sources:HashMap<_,_> = streams.into_iter().map(|stream| {

@@ -851,6 +851,7 @@ dependencies = [
  "ndarray",
  "ndarray-npy",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "spin_sleep",

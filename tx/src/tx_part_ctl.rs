@@ -45,7 +45,7 @@ impl TxPartCtler {
         tx_part_ch1 <= 0.0 || ((num - 1) as f64) < tx_part_ch0
     }
 
-    pub fn get_packet_state(&self, offset: f64, num: usize, channel: u16) -> Option<PacketType> {
+    fn get_packet_state(&self, offset: f64, num: usize, channel: u16) -> Option<PacketType> {
         match channel {
             1 => {
                 let tx_part_ch0 = self.tx_parts[0] * num as f64;

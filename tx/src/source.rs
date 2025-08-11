@@ -315,22 +315,20 @@ impl SourceManager {
         let mut name = stream.name();
 
         let socket_infos = vec![dispatch(params.links.clone(), params.tos)].into();
-
+        let link_num = params.links.len();
+        let target_rtt = params.target_rtt;
 
         let throttler = Arc::new(Mutex::new(
             RateThrottler::new(name.clone(), params.throttle, window_size, params.no_logging, false)
         ));
-        let link_num = params.links.len();
-        let target_rtt = params.target_rtt;
+        let tx_part_ctler = Arc::new(Mutex::new(
+            TxPartCtler::new(params.tx_parts.clone(), params.links.clone())
+        ));
 
         let rtt =  match params.calc_rtt {
             false => None,
             true => Some( RttRecorder::new( &name, params.port, link_num, target_rtt) )
         };
-
-        let tx_part_ctler = Arc::new(Mutex::new(
-            TxPartCtler::new(params.tx_parts.clone(), params.links.clone())
-        ));
 
         let start_timestamp = SystemTime::now();
         let stop_timestamp = SystemTime::now();
