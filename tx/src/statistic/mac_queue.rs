@@ -1,9 +1,10 @@
+#![allow(dead_code)]
+
 use std::fs::File;
 use std::io::Write;
 use std::thread;
-use std::{fs, time::Duration};
+use std::{fs};
 use std::collections::HashMap;
-use regex::Regex;
 use std::time::SystemTime;
 
 use crate::utils::ip_helper::{get_dev_from_ip};
@@ -31,6 +32,7 @@ fn parse_digits(s: &str, start: usize) -> Option<u64> {
     
     found.then_some(num)
 }
+
 pub struct MACQueueQuery {
     proc_file: String,
     queue_info: MACQueueInfo,
@@ -127,15 +129,14 @@ pub fn mon_mac_thread(
     mut mac_mon: MACQueueMonitor,
 ) -> thread::JoinHandle<()> {
     let mon_thread = thread::spawn(move || {
-        let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
-            .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
+        // let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
+        //     .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
 
         let mut counter = 0;
         let mut logger = File::create( "logs/mac-info.txt" ).unwrap();
 
         let mut log_line = String::new();
         loop {
-            // spin_sleeper.sleep(Duration::from_nanos(100_000));
             counter += 1;
 
             let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
