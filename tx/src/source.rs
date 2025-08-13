@@ -70,7 +70,6 @@ fn process_queue(
 
         if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
             packet.timestamp = timestamp;
-
             // Get IP address with minimal lock time
             let ip_addr = {
                 let controller = match tx_part_ctler.lock() {
