@@ -1,4 +1,3 @@
-use core::packet::PacketType;
 use std::cmp::Ordering;
 #[derive(Debug, Clone)]
 struct RTTEntry {
@@ -20,25 +19,19 @@ impl RTTEntry {
         }
     }
 
-    fn update_value(&mut self, channel: PacketType, value: f64)  {
+    fn update_value(&mut self, channel: u8, value: f64, delta : f64) {
         self.rtt = value;
         match channel {
-            PacketType::SLFL => {
-                self.channel_rtts[0] = Some(value);
+            0 => {
                 self.completed = true;
-            },
-            PacketType::SLSL => {
-                self.channel_rtts[1] = Some(value);
-                self.completed = true;
-            },
-            PacketType::DFL => {
                 self.channel_rtts[0] = Some(value);
-                self.completed = self.channel_rtts.iter().all(|rtt| rtt.is_some());
-            } 
-            PacketType::DSL => {
+                self.channel_rtts[1] = Some(value + delta);
+            }
+            1 => {
+                self.completed = true;
                 self.channel_rtts[1] = Some(value);
-                self.completed = self.channel_rtts.iter().all(|rtt| rtt.is_some());
-            },
+                self.channel_rtts[0] = Some(value - delta);
+            }
             _ => {panic!("Invalid packet type")}
         }
     }
@@ -61,22 +54,22 @@ impl RttRecords {
         }
     }
 
-    pub fn update(&mut self, seq: usize, channel: PacketType, rtt: f64) -> bool{
+    pub fn update(&mut self, seq: usize, channel: u8, rtt: f64, delta: f64) -> bool{
         let index = seq % self.max_length;
         // If the entry is already present and seq value is the same, update the value
         // Otherwise, create a new entry
         match &mut self.queue[index] {
             Some(entry) => {
                 if entry.seq == seq {
-                    entry.update_value(channel, rtt);
+                    entry.update_value(channel, rtt, delta);
                 } else {
                     self.queue[index] = Some(RTTEntry::new(seq, self.max_links));
-                    self.queue[index].as_mut().unwrap().update_value(channel, rtt);
+                    self.queue[index].as_mut().unwrap().update_value(channel, rtt, delta);
                 }
             }
             None => {
                 self.queue[index] = Some(RTTEntry::new(seq, self.max_links));
-                self.queue[index].as_mut().unwrap().update_value(channel, rtt);
+                self.queue[index].as_mut().unwrap().update_value(channel, rtt, delta);
             }
         }
         self.queue[index].as_ref().unwrap().completed

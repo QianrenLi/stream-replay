@@ -1,11 +1,9 @@
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use clap::Parser;
-use log::trace;
 use std::io::ErrorKind;
 
 use crate::record::{RecvData, RecvRecord};
-use core::packet::{self, PacketType};
 use core::socket::*;
 
 const PONG_PORT_INC: u16 = 1024;
@@ -81,31 +79,14 @@ fn handle_rtt(
     data.recv_records.entry(seq).or_insert_with(RecvRecord::new).record(buffer);
     let _record = data.recv_records.get_mut(&seq).unwrap();
 
-    if _record.is_fst_ack() || _record.is_scd_ack() {
-        let packet_type = if src_addr.ip().to_string() == args.src_ipaddrs[0] {
-            trace!("ACKFirst: Time {} -> seq: {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(), seq);
-            _record.is_ack.0 = true;
-            if _record.is_complete() {
-                PacketType::SLFL
-            } else {
-                PacketType::DFL
-            }
-        } else {
-            trace!("ACKSecond: Time {} -> seq: {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(), seq);
-            _record.is_ack.1 = true;
-            if _record.is_complete() {
-                PacketType::SLSL
-            } else {
-                PacketType::DSL
-            }
-        };
-        buffer[18..19].copy_from_slice(packet::to_indicator(packet_type).to_le_bytes().as_ref());
+    if _record.is_complete {
+        data.stutter.update( std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() );
+
+        buffer[19..27].copy_from_slice(_record.delta().to_le_bytes().as_ref());
+
         let ping_addr = format!("{}:{}", src_addr.ip().to_string(), args.port + PONG_PORT_INC);
         send_ack(pong_socket, buffer, &ping_addr);
-    }
 
-    if _record.is_complete() {
-        data.stutter.update( std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() );
         if args.rx_mode && data.tx.is_some() {
             let res = _record.gather();
             if let Some(ref tx) = data.tx {

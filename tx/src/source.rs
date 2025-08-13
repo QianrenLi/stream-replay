@@ -2,10 +2,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{UdpSocket};
 use ndarray::prelude::*;
 use ndarray_npy::read_npy;
-use log::trace;
 
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -37,22 +36,20 @@ fn generate_packets(
     let mut rng = thread_rng();
     packet_states.shuffle(&mut rng);
 
-    for packet_state in packet_states {
-        for (offset, packet_type) in packet_state {
-            let length = if offset == (num - 1) as u16 {
-                _remains as u16
-            } else {
-                MAX_PAYLOAD_LEN as u16
-            };
+    for (offset, packet_type) in packet_states {
+        let length = if offset == (num - 1) as u16 {
+            _remains as u16
+        } else {
+            MAX_PAYLOAD_LEN as u16
+        };
 
-            template.set_length(length);
-            template.set_offset(offset);
-            template.set_indicator(packet_type);
-            if let Some(buf) = buffer {
-                template.set_payload(&buf[(offset as usize * MAX_PAYLOAD_LEN)..(offset as usize * MAX_PAYLOAD_LEN) + length as usize]);
-            };
-            packets.push(template.clone());
-        }
+        template.set_length(length);
+        template.set_offset(offset);
+        template.set_indicator(packet_type);
+        if let Some(buf) = buffer {
+            template.set_payload(&buf[(offset as usize * MAX_PAYLOAD_LEN)..(offset as usize * MAX_PAYLOAD_LEN) + length as usize]);
+        };
+        packets.push(template.clone());
     }
     packets
 }
@@ -294,7 +291,7 @@ impl SourceManager {
             RateThrottler::new(name.clone(), params.throttle, window_size, params.no_logging, false)
         ));
         let tx_part_ctler = Arc::new(Mutex::new(
-            TxPartCtler::new(params.tx_parts.clone(), params.links.clone())
+            TxPartCtler::new(params.tx_part.clone(), params.links.clone())
         ));
 
         let rtt =  match params.calc_rtt {
@@ -322,12 +319,9 @@ impl SourceManager {
         }
     }
 
-    pub fn set_tx_parts(&self, tx_parts:Vec<f64>) {
+    pub fn set_tx_parts(&self, tx_part:f64) {
         if let Ok(ref mut tx_part_ctler) = self.tx_part_ctler.lock() {
-            if tx_parts.len() != tx_part_ctler.tx_parts.len() {
-                return;
-            }
-            tx_part_ctler.set_tx_parts(tx_parts);
+            tx_part_ctler.set_tx_part(tx_part);
         }
     }
 
@@ -347,7 +341,7 @@ impl SourceManager {
             (None, None, None, None)
         };
     
-        let tx_parts = self.tx_part_ctler.lock().ok()?.tx_parts.clone();
+        let tx_parts = self.tx_part_ctler.lock().ok()?.tx_part.clone();
 
         
     

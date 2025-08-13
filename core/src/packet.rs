@@ -21,16 +21,10 @@ pub unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
 
 #[derive(Clone)]
 pub enum PacketType {
-    SNL,
-    SL,
-    DFN,
-    DFL,
-    DSS,
-    DSF,
-    DSM,
-    DSL,
-    SLFL,
-    SLSL,
+    FirstLink,
+    SecondLink,
+    LastPacketInFirstLink,
+    LastPacketInSecondLink,
 }
 
 #[repr(C,packed)]
@@ -73,7 +67,7 @@ impl PacketStruct {
 }
 
 pub fn channel_info(indicator: u8) -> u8{
-    (indicator & 0b00000100) >> 2
+    indicator & 0b00000001 // Get the last bit of the indicator
 }
 
 pub fn from_buffer(buffer: &[u8]) -> PacketStruct {
@@ -88,30 +82,18 @@ pub fn from_buffer(buffer: &[u8]) -> PacketStruct {
 
 pub fn to_indicator(packet_type: PacketType) -> u8 {
     match packet_type {
-        PacketType::SNL =>  0b00000000,
-        PacketType::SL  =>  0b00000001,
-        PacketType::DFN =>  0b00000010,
-        PacketType::DFL =>  0b00000011,
-        PacketType::DSS =>  0b00000100,
-        PacketType::DSF =>  0b00000101,
-        PacketType::DSM =>  0b00000110,
-        PacketType::DSL =>  0b00000111,
-        PacketType::SLFL => 0b00001000,
-        PacketType::SLSL => 0b00001100,
+        PacketType::FirstLink      =>  0b00000000,
+        PacketType::SecondLink      =>  0b00000001,
+        PacketType::LastPacketInFirstLink  =>  0b00000010,
+        PacketType::LastPacketInSecondLink  =>  0b00000011,
     }
 }
 pub fn get_packet_type(indicators: u8) -> PacketType {
     match indicators {
-        0b00000000 => PacketType::SNL,
-        0b00000001 => PacketType::SL,
-        0b00000010 => PacketType::DFN,
-        0b00000011 => PacketType::DFL,
-        0b00000100 => PacketType::DSS,
-        0b00000101 => PacketType::DSF,
-        0b00000110 => PacketType::DSM,
-        0b00000111 => PacketType::DSL,
-        0b00001000 => PacketType::SLFL,
-        0b00001100 => PacketType::SLSL,
+        0b00000000 => PacketType::FirstLink,      // FL
+        0b00000001 => PacketType::SecondLink,      // SL
+        0b00000010 => PacketType::LastPacketInFirstLink,  // LPinFL
+        0b00000011 => PacketType::LastPacketInSecondLink,  // LPinSL
         _ => panic!("Invalid packet type")
     }
 }

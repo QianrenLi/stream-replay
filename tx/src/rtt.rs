@@ -44,14 +44,15 @@ fn pong_recv_thread(name: String, port: u16, seq_records: GuardedSeqRecords, rtt
 
     while let Ok(_) = sock.recv_from(&mut buf) {
         let seq = u32::from_le_bytes( buf[..4].try_into().unwrap() );
-        let indicator = u8::from_le_bytes( buf[18..19].try_into().unwrap() );
+        let indicator = u8::from_le_bytes( buf[9..10].try_into().unwrap() );
+        let delta = f64::from_le_bytes(buf[19..27].try_into().unwrap());
         let time_now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
         if let Some(last_time) = {
             let mut _records = seq_records.lock().unwrap();
             _records.get(&seq).cloned()
         } {
             let rtt = time_now - last_time;
-            let is_complete = rtt_records.lock().unwrap().update(seq as usize,  packet::get_packet_type(indicator), rtt);
+            let is_complete = rtt_records.lock().unwrap().update(seq as usize,  packet::channel_info(indicator), rtt, delta);
             if is_complete {
                 let mut _records = seq_records.lock().unwrap(); 
                 _records.remove(&seq);
