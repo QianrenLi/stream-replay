@@ -1,21 +1,41 @@
-use core::packet::{self, PacketType};
-use crate::link::Link;
+use core::packet::{PacketType};
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct TxPartCtler {
     pub tx_part: f64,
-    tx_ipaddrs: Vec<String>,
+    pub policy: Policy,
+    pub blocked_signals: Vec<bool>,
 }
 
+#[derive(Serialize, Deserialize, Debug,Clone, Default, Copy)]
+pub enum Policy {
+    Proposed,
+    ConditionalRR,
+    #[default]
+    HardThreshold,
+}
+
+pub struct SchedulingParameters {
+    pub arrival_time: f64,
+    pub current_time: f64,
+    pub offset: usize,
+    pub num: usize,
+}
+
+
+pub trait Schedulable {
+    fn schedule(&self, params: &SchedulingParameters) -> PacketType;
+}
+
+
 impl TxPartCtler {
-    pub fn new(tx_part: f64, links: Vec<Link>) -> Self {
-        let mut tx_ipaddrs = Vec::new();
-        for link in links.iter() {
-            tx_ipaddrs.push(link.tx_ipaddr.clone());
-        }
+    pub fn new(tx_part: f64, policy: Policy) -> Self {
         TxPartCtler {
             tx_part,
-            tx_ipaddrs,
+            policy,
+            blocked_signals: vec![false; 2],
         }
     }
 
@@ -29,16 +49,33 @@ impl TxPartCtler {
     //             ^           
     //             |           
     //     tx_part * num
-    pub fn get_packet_state(&self, offset: usize, num: usize) -> PacketType {
-        let is_last = offset == num - 1;
-        if offset as f64 >= self.tx_part * num as f64 {
-            if is_last { PacketType::LastPacketInSecondLink } else { PacketType::SecondLink }
-        } else {
-            if is_last { PacketType::LastPacketInFirstLink } else { PacketType::FirstLink }
+    pub fn get_packet_state(&mut self, params: SchedulingParameters) -> Option<PacketType> {
+        match self.policy {
+            Policy::ConditionalRR => {
+                let is_last = params.offset == params.num - 1;
+                if !self.blocked_signals[0] {
+                    if is_last { return Some(PacketType::LastPacketInFirstLink) } else { return Some(PacketType::FirstLink) }
+                }
+                if self.blocked_signals[0] && !self.blocked_signals[1] {
+                    if is_last { return Some(PacketType::LastPacketInSecondLink) } else { return Some(PacketType::SecondLink) }
+                }
+                self.blocked_signals[0] = false;
+                self.blocked_signals[1] = false;
+                None
+            },
+            Policy::HardThreshold => {
+                let is_last = params.offset == params.num - 1;
+                if params.offset as f64 >= self.tx_part * params.num as f64 {
+                    if is_last { Some(PacketType::LastPacketInSecondLink) } else { Some(PacketType::SecondLink) }
+                } else {
+                    if is_last { Some(PacketType::LastPacketInFirstLink) } else { Some(PacketType::FirstLink) }
+                }
+            },
+            _ => {
+                panic!("Unsupported policy for TxPartCtler");
+            }
         }
+
     }
 
-    pub fn packet_to_ipaddr(&self, indicator: u8) -> String {
-        self.tx_ipaddrs[packet::channel_info(indicator) as usize].clone()
-    }
 }

@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 use std::net::{UdpSocket};
+use std::vec;
 use ndarray::prelude::*;
 use ndarray_npy::read_npy;
 
@@ -12,12 +13,12 @@ use crate::dispatcher::dispatch;
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
-use crate::tx_part_ctl::TxPartCtler;
+use crate::tx_part_ctl::{SchedulingParameters, TxPartCtler};
 use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
 type GuardedTxPartCtler = Arc<Mutex<TxPartCtler>>;
-pub type SocketInfo = HashMap<String, (UdpSocket, String)>;
+pub type SocketInfo = HashMap<usize, (UdpSocket, String)>;
 
 pub const STREAM_PROTO: &str = "stream://";
 
@@ -27,6 +28,11 @@ fn generate_packets(
     buffer: Option<&Vec<u8>>,
 ) -> Vec<PacketWithMeta> {
     let mut packets = Vec::new();
+
+    let now = SystemTime::now();
+    let unix_epoch = SystemTime::UNIX_EPOCH;
+    let timestamp = now.duration_since(unix_epoch).unwrap().as_secs_f64();
+    template.arrival_time = timestamp;
 
     for offset in 0..template.num as u16 {
         let length = if offset == (template.num - 1) as u16 {
@@ -52,30 +58,31 @@ fn process_queue(
     stop_time: &SystemTime
 ) {
     // Precompute unix epoch once
-    let unix_epoch = SystemTime::UNIX_EPOCH;
-    
     while SystemTime::now() < *stop_time {
         // Compute current time once per iteration
-        let now = SystemTime::now();
-        let timestamp = now.duration_since(unix_epoch).unwrap().as_secs_f64();
-
         if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
-            packet.arrival_time = timestamp;
+            let schedule_param = SchedulingParameters {
+                arrival_time: packet.arrival_time,
+                current_time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
+                offset: packet.offset as usize,
+                num: packet.num as usize,
+            };
             // Get IP address with minimal lock time
-            let ip_addr = {
-                let controller = match tx_part_ctler.lock() {
-                    Ok(c) => c,
-                    Err(_) => return false,
-                };
-                let packet_type = controller.get_packet_state(packet.offset as usize, packet.num);
-                packet.set_indicator(packet_type);
-                controller.packet_to_ipaddr(packet.indicators.clone())
+            match tx_part_ctler.lock() {
+                Ok(mut controller) => {
+                    if let Some(packet_type) = controller.get_packet_state(schedule_param){
+                        packet.set_indicator(packet_type);
+                    } else {
+                        return false;
+                    }
+                },
+                Err(_) => return false,
             };
 
             // Lookup socket without holding controller lock
-            let sender = match socket_infos.get(&ip_addr) {
+            let sender = match socket_infos.get(&packet.channel) {
                 Some(s) => s,
-                None => return false,
+                None => panic!("No socket found for channel {}", packet.channel),
             };
 
             // Prepare send parameters outside match
@@ -86,8 +93,12 @@ fn process_queue(
             // Attempt to send
             match sender.0.send_to(&buf[..length], &rx_addr) {
                 Ok(_) => true,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
-                Err(e) => false,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    tx_part_ctler.lock().unwrap().blocked_signals[packet.channel] = true;
+                    false
+                },
+                Err(_) => { tx_part_ctler.lock().unwrap().blocked_signals[packet.channel] = true; 
+                    false }
             }
         }) {
             // Continue processing next packet
@@ -283,7 +294,7 @@ impl SourceManager {
             RateThrottler::new(name.clone(), params.throttle, window_size, params.no_logging, false)
         ));
         let tx_part_ctler = Arc::new(Mutex::new(
-            TxPartCtler::new(params.tx_part.clone(), params.links.clone())
+            TxPartCtler::new(params.tx_part, params.policy)
         ));
 
         let rtt =  match params.calc_rtt {

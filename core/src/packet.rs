@@ -44,6 +44,7 @@ pub struct PacketWithMeta {
     pub port: u16,      
     pub num: usize,       // number of packets in the original datagram
     pub arrival_time: f64,
+    pub channel: usize,
 }
 
 impl Deref for PacketWithMeta {
@@ -64,7 +65,8 @@ impl PacketWithMeta {
             packet: PacketStruct::new(), 
             port,
             arrival_time: 0.0,
-            num: 0
+            num: 0,
+            channel: 0,
         }
     }
 
@@ -75,6 +77,11 @@ impl PacketWithMeta {
     pub fn next_seq(&mut self, num: usize) {
         self.num = num;
         self.packet.next_seq(num);
+    }
+
+    pub fn set_indicator(&mut self, packet_type: PacketType) {
+        self.packet.set_indicator(packet_type);
+        self.channel = channel_info(self.packet.indicators) as usize;
     }
 }
 
@@ -127,6 +134,7 @@ pub fn to_indicator(packet_type: PacketType) -> u8 {
         PacketType::LastPacketInSecondLink  =>  0b00000011,
     }
 }
+
 pub fn get_packet_type(indicators: u8) -> PacketType {
     match indicators {
         0b00000000 => PacketType::FirstLink,      // FL

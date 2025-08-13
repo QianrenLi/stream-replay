@@ -3,7 +3,7 @@ use rand::prelude::*;
 use rand::distributions::Standard;
 use serde::{Serialize, Deserialize};
 
-use crate::{link::Link, source::STREAM_PROTO};
+use crate::{link::Link, source::STREAM_PROTO, tx_part_ctl::Policy};
 
 const fn _default_duration() -> [f64; 2] { [0.0, f64::MAX] }
 const fn _default_loops() -> usize { usize::MAX }
@@ -29,6 +29,7 @@ pub struct ConnParams {
     #[serde(default)] pub no_logging: bool, //default: false
     #[serde(default)] pub links: Vec<Link>, //default: [[]]
     #[serde(default)] pub tx_part: f64,     //default: []
+    #[serde(default)] pub policy: Policy,   //default: []
 }
 
 
@@ -49,8 +50,8 @@ impl std::fmt::Display for StreamParam {
         let _file:String = _param.npy_file.clone();
 
         write!(f,
-            "{type} {{ port: {port}, tos: {tos}, throttle: {throttle} Mbps, file: \"{file}\", loops: {loops} }}",
-            type=_type, port=_param.port, tos=_param.tos, throttle=_param.throttle, loops=_param.loops as isize, file=_file
+            "{type} {{ port: {port}, tos: {tos}, throttle: {throttle} Mbps, file: \"{file}\", loops: {loops}, with Policy {policy:?} }}",
+            type=_type, port=_param.port, tos=_param.tos, throttle=_param.throttle, loops=_param.loops as isize, file=_file, policy=_param.policy
         )
     }
 }
