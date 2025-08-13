@@ -6,9 +6,6 @@ use std::net::{UdpSocket};
 use ndarray::prelude::*;
 use ndarray_npy::read_npy;
 
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-
 use core::packet::*;
 use crate::conf::{StreamParam, ConnParams};
 use crate::dispatcher::dispatch;
@@ -25,17 +22,14 @@ pub type SocketInfo = HashMap<String, (UdpSocket, String)>;
 pub const STREAM_PROTO: &str = "stream://";
 
 fn generate_packets(
-    num: usize, 
     _remains: usize, 
-    template: &mut PacketStruct, 
-    tx_part_ctler: &GuardedTxPartCtler,
+    template: &mut PacketWithMeta, 
     buffer: Option<&Vec<u8>>,
-) -> Vec<PacketStruct> {
+) -> Vec<PacketWithMeta> {
     let mut packets = Vec::new();
-    let packet_states = tx_part_ctler.lock().unwrap().get_packet_states(num);
 
-    for (offset, packet_type) in packet_states {
-        let length = if offset == (num - 1) as u16 {
+    for offset in 0..template.num as u16 {
+        let length = if offset == (template.num - 1) as u16 {
             _remains as u16
         } else {
             MAX_PAYLOAD_LEN as u16
@@ -43,7 +37,6 @@ fn generate_packets(
 
         template.set_length(length);
         template.set_offset(offset);
-        template.set_indicator(packet_type);
         if let Some(buf) = buffer {
             template.set_payload(&buf[(offset as usize * MAX_PAYLOAD_LEN)..(offset as usize * MAX_PAYLOAD_LEN) + length as usize]);
         };
@@ -67,13 +60,15 @@ fn process_queue(
         let timestamp = now.duration_since(unix_epoch).unwrap().as_secs_f64();
 
         if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
-            packet.timestamp = timestamp;
+            packet.arrival_time = timestamp;
             // Get IP address with minimal lock time
             let ip_addr = {
                 let controller = match tx_part_ctler.lock() {
                     Ok(c) => c,
                     Err(_) => return false,
                 };
+                let packet_type = controller.get_packet_state(packet.offset as usize, packet.num);
+                packet.set_indicator(packet_type);
                 controller.packet_to_ipaddr(packet.indicators.clone())
             };
 
@@ -85,7 +80,7 @@ fn process_queue(
 
             // Prepare send parameters outside match
             let length = APP_HEADER_LENGTH + packet.length as usize;
-            let buf = unsafe { any_as_u8_slice(&packet) };
+            let buf = packet.to_u8_slice();
             let rx_addr = format!("{}:{}", sender.1, packet.port as usize);
             
             // Attempt to send
@@ -110,7 +105,7 @@ pub fn stream_thread(
     socket_infos: SocketInfo, 
     dest: BufferReceiver
 ) {
-    let mut template = PacketStruct::new(params.port);
+    let mut template = PacketWithMeta::new(params.port);
     let stop_time = SystemTime::now().checked_add(Duration::from_secs_f64(params.duration[1])).unwrap();
 
     while SystemTime::now() <= stop_time {
@@ -119,10 +114,10 @@ pub fn stream_thread(
         let size_bytes = buffer.len();
         let (_num, _remains) = (size_bytes / MAX_PAYLOAD_LEN, size_bytes % MAX_PAYLOAD_LEN);
         let num = _num + if _remains > 0 { 1 } else { 0 };
-        template.next_seq(_num, _remains);
+        template.next_seq(num);
 
         // Generate packets
-        let packets = generate_packets( num, _remains, &mut template, &tx_part_ctler, Some(&buffer));
+        let packets = generate_packets( _remains, &mut template, Some(&buffer));
 
         // Append to application-layer queue
         throttler.lock().unwrap().prepare(packets);
@@ -149,7 +144,7 @@ pub fn video_thread(
 ) {
     let trace: Vec<(u64, Vec<u8>)> = read_packets(&params.npy_file).expect("loading failed.");
     let (start_offset, duration) = (params.start_offset, params.duration);
-    let mut template = PacketStruct::new(params.port);
+    let mut template = PacketWithMeta::new(params.port);
     let spin_sleeper = spin_sleep::SpinSleeper::new(100_000).with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
 
     let mut loops = 0;
@@ -165,10 +160,10 @@ pub fn video_thread(
             let size_bytes = trace[idx].1.len();
             let (_num, _remains) = (size_bytes / MAX_PAYLOAD_LEN, size_bytes % MAX_PAYLOAD_LEN);
             let num = _num + if _remains > 0 { 1 } else { 0 };
-            template.next_seq(_num, _remains);
+            template.next_seq(num);
 
             // Generate packets
-            let packets = generate_packets(num, _remains, &mut template, &tx_part_ctler, Some(&trace[idx].1));
+            let packets = generate_packets(_remains, &mut template,  Some(&trace[idx].1));
 
             // Append to application-layer queue
             throttler.lock().unwrap().prepare(packets);
@@ -207,7 +202,7 @@ pub fn source_thread(
 ) {
     let trace: Array2<u64> = read_npy(&params.npy_file).expect("loading failed.");
     let (start_offset, duration) = (params.start_offset, params.duration);
-    let mut template = PacketStruct::new(params.port);
+    let mut template = PacketWithMeta::new(params.port);
     let spin_sleeper = spin_sleep::SpinSleeper::new(100_000).with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
 
     let mut loops = 0;
@@ -226,10 +221,10 @@ pub fn source_thread(
             // Generate packets
             let (_num, _remains) = (size_bytes / MAX_PAYLOAD_LEN, size_bytes % MAX_PAYLOAD_LEN);
             let num = _num + if _remains > 0 { 1 } else { 0 };
-            template.next_seq(_num, _remains);
+            template.next_seq(num);
 
             // Generate packets
-            let packets = generate_packets(num, _remains, &mut template, &tx_part_ctler, None);
+            let packets = generate_packets( _remains, &mut template, None);
 
             // Append to application-layer queue
             throttler.lock().unwrap().prepare(packets);

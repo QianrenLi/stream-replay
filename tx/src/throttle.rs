@@ -1,7 +1,7 @@
 use log::trace;
 use std::time::SystemTime;
 use std::collections::VecDeque;
-use core::packet::{PacketStruct,UDP_MAX_LENGTH};
+use core::packet::{PacketWithMeta,UDP_MAX_LENGTH};
 // use std::sync::{Arc, Mutex};
 
 type TIME = SystemTime;
@@ -61,7 +61,7 @@ pub struct RateThrottler {
     pub name: String,
     is_log: bool,
     window: CycledVecDequeue<(TIME, SIZE)>,
-    buffer: CycledVecDequeue<PacketStruct>,
+    buffer: CycledVecDequeue<PacketWithMeta>,
     sum_bytes: usize,
     acc_error: usize,
     max_error: usize,
@@ -116,7 +116,7 @@ impl RateThrottler {
         Some(average_rate_mbps)
     }
 
-    pub fn prepare(&mut self, packets: Vec<PacketStruct>) {
+    pub fn prepare(&mut self, packets: Vec<PacketWithMeta>) {
         let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
         let _rate_mbps = self.current_rate_mbps(None).unwrap_or(0.0);
         if self.is_log {
@@ -128,7 +128,7 @@ impl RateThrottler {
     }
 
     pub fn try_consume<T>(&mut self, callback:T) -> Option<bool>
-    where T: Fn(PacketStruct) -> bool {
+    where T: Fn(PacketWithMeta) -> bool {
         match self.buffer.front().cloned() {
             None => None,
             Some(packet) => {
@@ -147,7 +147,7 @@ impl RateThrottler {
         }
     }
 
-    pub fn consume(&mut self) -> Option<PacketStruct> {
+    pub fn consume(&mut self) -> Option<PacketWithMeta> {
         let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
         let _rate_mbps = self.current_rate_mbps(None).unwrap_or(0.0);
         if self.is_log {

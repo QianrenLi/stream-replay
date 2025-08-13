@@ -1,7 +1,6 @@
 use core::packet::{self, PacketType};
 use crate::link::Link;
 
-type OffsetPacket = (u16, PacketType);
 #[derive(Debug)]
 pub struct TxPartCtler {
     pub tx_part: f64,
@@ -30,23 +29,13 @@ impl TxPartCtler {
     //             ^           
     //             |           
     //     tx_part * num
-    fn get_packet_state(&self, offset: usize, num: usize) -> PacketType {
+    pub fn get_packet_state(&self, offset: usize, num: usize) -> PacketType {
         let is_last = offset == num - 1;
         if offset as f64 >= self.tx_part * num as f64 {
             if is_last { PacketType::LastPacketInSecondLink } else { PacketType::SecondLink }
         } else {
             if is_last { PacketType::LastPacketInFirstLink } else { PacketType::FirstLink }
         }
-    }
-
-    pub fn get_packet_states(&self, num: usize) -> Vec<OffsetPacket> {
-        let mut results = Vec::new();
-    
-        for offset in 0..num {
-            let packet_type = self.get_packet_state(offset, num);
-            results.push((offset as u16, packet_type));
-        }
-        results
     }
 
     pub fn packet_to_ipaddr(&self, indicator: u8) -> String {

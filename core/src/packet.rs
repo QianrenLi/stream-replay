@@ -1,8 +1,9 @@
 #![allow(dead_code)]
+use std::ops::{Deref, DerefMut};
 
 const IP_HEADER_LENGTH:usize = 20;
 const UDP_HEADER_LENGTH:usize = 8;
-pub const APP_HEADER_LENGTH:usize = 19;
+pub const APP_HEADER_LENGTH:usize = 9;
 pub const UDP_MAX_LENGTH:usize = 1500 - IP_HEADER_LENGTH - UDP_HEADER_LENGTH;
 pub const MAX_PAYLOAD_LEN:usize = UDP_MAX_LENGTH - APP_HEADER_LENGTH;
 
@@ -12,7 +13,7 @@ pub type PacketReceiver = flume::Receiver<PacketStruct>;
 pub type BufferSender = flume::Sender<Vec<u8>>;
 pub type BufferReceiver = flume::Receiver<Vec<u8>>;
 
-pub unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     ::std::slice::from_raw_parts(
         (p as *const T) as *const u8,
         ::std::mem::size_of::<T>(),
@@ -33,25 +34,63 @@ pub struct PacketStruct {
     pub seq: u32,       //4 Bytes
     pub offset: u16,    //2 Bytes, how much left to send
     pub length: u16,    //2 Bytes
-    pub port: u16,      //2 Bytes
     pub indicators: u8, //1 Byte, 0 - 1 represents the interface id, 10~19 represents the last packet of interface id 
-    pub timestamp: f64, //8 Bytes
     pub payload: [u8; MAX_PAYLOAD_LEN]
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct PacketWithMeta {
+    pub packet: PacketStruct,
+    pub port: u16,      
+    pub num: usize,       // number of packets in the original datagram
+    pub arrival_time: f64,
+}
+
+impl Deref for PacketWithMeta {
+    type Target = PacketStruct;
+    fn deref(&self) -> &Self::Target {
+        &self.packet
+    }
+}
+impl DerefMut for PacketWithMeta {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.packet
+    }
+}
+
+impl PacketWithMeta {
+    pub fn new( port: u16 ) -> Self {
+        PacketWithMeta { 
+            packet: PacketStruct::new(), 
+            port,
+            arrival_time: 0.0,
+            num: 0
+        }
+    }
+
+    pub fn to_u8_slice(&self) -> &[u8] {
+        unsafe { any_as_u8_slice(&self.packet) }
+    }
+
+    pub fn next_seq(&mut self, num: usize) {
+        self.num = num;
+        self.packet.next_seq(num);
+    }
+}
+
 impl PacketStruct {
-    pub fn new(port: u16) -> Self {
+    pub fn new() -> Self {
         // dummy payload content from 0..MAX_PAYLOAD_LEN
         let mut payload = [0u8; MAX_PAYLOAD_LEN];
         (0..MAX_PAYLOAD_LEN).for_each(|i| payload[i] = i as u8);
-        PacketStruct { seq: 0, offset: 0, length: 0, port, timestamp:0.0, indicators:0 , payload }
+        PacketStruct { seq: 0, offset: 0, length: 0, indicators:0 , payload }
     }
     pub fn set_length(&mut self, length: u16) {
         self.length = length;
     }
-    pub fn next_seq(&mut self, num: usize, remains:usize) {
+    pub fn next_seq(&mut self, num: usize) {
         self.seq += 1;
-        self.offset = if remains>0 {num as u16+1} else {num as u16};
+        self.offset = num as u16;
     }
     pub fn set_offset(&mut self, offset: u16) {
         self.offset = offset;
