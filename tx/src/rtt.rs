@@ -44,7 +44,7 @@ fn pong_recv_thread(name: String, port: u16, seq_records: GuardedSeqRecords, rtt
 
     while let Ok(_) = sock.recv_from(&mut buf) {
         let seq = u32::from_le_bytes( buf[..4].try_into().unwrap() );
-        let indicator = u8::from_le_bytes( buf[9..10].try_into().unwrap() );
+        let indicator = u8::from_le_bytes( buf[10..11].try_into().unwrap() );
         let delta = f64::from_le_bytes(buf[19..27].try_into().unwrap());
         let time_now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
         if let Some(last_time) = {
@@ -52,15 +52,15 @@ fn pong_recv_thread(name: String, port: u16, seq_records: GuardedSeqRecords, rtt
             _records.get(&seq).cloned()
         } {
             let rtt = time_now - last_time;
-            let is_complete = rtt_records.lock().unwrap().update(seq as usize,  packet::channel_info(indicator), rtt, delta);
-            if is_complete {
-                let mut _records = seq_records.lock().unwrap(); 
-                _records.remove(&seq);
-            }
+            rtt_records.lock().unwrap().update(seq as usize,  packet::channel_info(indicator), rtt, delta);
+
             if let Some(ref mut logger) = logger {
-                let message = format!("{} {:.6} {:.6} \n", seq, rtt, packet::channel_info(indicator));
+                let message = format!("{} {:.6} {:.6}\n", seq, rtt, delta);
                 logger.write_all( message.as_bytes() ).unwrap();
             }
+
+            let mut _records = seq_records.lock().unwrap(); 
+            _records.remove(&seq);
         };
     }
 }

@@ -61,8 +61,8 @@ impl RecvRecord {
         let rx_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
 
         match packet::get_packet_type(packet.indicators) {
-            PacketType::SecondLink => self.offsets.second_link_rx_time = Some(rx_time),
             PacketType::FirstLink => self.offsets.first_link_rx_time = Some(rx_time),
+            PacketType::SecondLink => self.offsets.second_link_rx_time = Some(rx_time),
             PacketType::LastPacketInFirstLink => {
                 self.last_packet_id = offset;
                 self.offsets.first_link_rx_time = Some(rx_time);

@@ -54,7 +54,7 @@ impl RttRecords {
         }
     }
 
-    pub fn update(&mut self, seq: usize, channel: u8, rtt: f64, delta: f64) -> bool{
+    pub fn update(&mut self, seq: usize, channel: u8, rtt: f64, delta: f64) {
         let index = seq % self.max_length;
         // If the entry is already present and seq value is the same, update the value
         // Otherwise, create a new entry
@@ -72,7 +72,6 @@ impl RttRecords {
                 self.queue[index].as_mut().unwrap().update_value(channel, rtt, delta);
             }
         }
-        self.queue[index].as_ref().unwrap().completed
     }
 
     fn average_between_quantiles(values: &mut Vec<f64>) -> f64 {
