@@ -32,9 +32,7 @@ fn generate_packets(
     buffer: Option<&Vec<u8>>,
 ) -> Vec<PacketStruct> {
     let mut packets = Vec::new();
-    let mut packet_states = tx_part_ctler.lock().unwrap().get_packet_states(num);
-    let mut rng = thread_rng();
-    packet_states.shuffle(&mut rng);
+    let packet_states = tx_part_ctler.lock().unwrap().get_packet_states(num);
 
     for (offset, packet_type) in packet_states {
         let length = if offset == (num - 1) as u16 {
