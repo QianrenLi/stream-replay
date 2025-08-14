@@ -5,7 +5,7 @@ use std::io::Write;
 use std::thread;
 use std::{fs};
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::utils::ip_helper::{get_dev_from_ip};
 
@@ -129,8 +129,9 @@ pub fn mon_mac_thread(
     mut mac_mon: MACQueueMonitor,
 ) -> thread::JoinHandle<()> {
     let mon_thread = thread::spawn(move || {
-        // let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
-        //     .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
+        let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
+            .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
+        let start_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
 
         let mut counter = 0;
         let mut logger = File::create( "logs/mac-info.txt" ).unwrap();
@@ -139,14 +140,12 @@ pub fn mon_mac_thread(
         loop {
             counter += 1;
 
-            let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
-
             mac_mon.query.iter_mut().for_each(|(_ip, query)| {
                 query.update_queue_info();
                 // Capture the MAC queue info along with timestamp
                 log_line.push_str(&format!(
-                    "{:?} - {:?}\n",
-                    current_time,
+                    "{:?}\n",
+                    // current_time,
                     query.get_queue_info(),
                     
                 ));
@@ -158,6 +157,9 @@ pub fn mon_mac_thread(
                     .expect("Failed to write to log file");
                 log_line.clear();
             }
+
+            spin_sleeper.sleep( Duration::from_secs_f64(start_time + counter as f64 * 0.005 - SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64()) );
+
         }
     });
     mon_thread
