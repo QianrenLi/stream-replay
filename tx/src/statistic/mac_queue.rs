@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
-use std::fs::File;
-use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::{fs};
 use std::collections::HashMap;
@@ -9,11 +8,23 @@ use std::time::{Duration, SystemTime};
 
 use crate::utils::ip_helper::{get_dev_from_ip};
 
-type MACQueueInfo = HashMap<u8, u64>;
+pub type MACQueueInfo = HashMap<u8, usize>;
+pub type GuardedMACMonitor = Arc<Mutex<MACQueueMonitor>>;
 
-fn parse_digits(s: &str, start: usize) -> Option<u64> {
+#[derive(Debug, Clone)]
+pub struct MACQueueQuery {
+    proc_file: String,
+    queue_info: MACQueueInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct MACQueueMonitor {
+    query: HashMap<String, MACQueueQuery>,
+}
+
+fn parse_digits(s: &str, start: usize) -> Option<usize> {
     let bytes = s.as_bytes();
-    let mut num: u64 = 0;
+    let mut num: usize = 0;
     let mut found = false;
     
     // Process each byte from start position
@@ -24,7 +35,7 @@ fn parse_digits(s: &str, start: usize) -> Option<u64> {
                 // Check for overflow during calculation
                 num = num
                     .checked_mul(10)?
-                    .checked_add((b - b'0') as u64)?;
+                    .checked_add((b - b'0') as usize)?;
             }
             _ => break, // Stop at first non-digit
         }
@@ -33,10 +44,6 @@ fn parse_digits(s: &str, start: usize) -> Option<u64> {
     found.then_some(num)
 }
 
-pub struct MACQueueQuery {
-    proc_file: String,
-    queue_info: MACQueueInfo,
-}
 
 impl MACQueueQuery {
     pub fn new(dev: &str) -> Self {
@@ -76,7 +83,7 @@ impl MACQueueQuery {
                         parse_digits(&line, a_abs + 3)
                     ) {
                         // Handle u8 overflow same as original (unwrap_or(0))
-                        let ac_val = if ac_val > u64::from(u8::MAX) { 0 } else { ac_val as u8 };
+                        let ac_val = if ac_val > usize::from(u8::MAX) { 0 } else { ac_val as u8 };
                         *self.queue_info.entry(ac_val).or_insert(0) += pkt_num;
                     }
                 }
@@ -90,9 +97,6 @@ impl MACQueueQuery {
     
 }
 
-pub struct MACQueueMonitor {
-    query: HashMap<String, MACQueueQuery>,
-}
 
 impl MACQueueMonitor {
     pub fn new(ips: &Vec<String>) -> Self {
@@ -123,43 +127,41 @@ impl MACQueueMonitor {
         }
     }
 
+    pub fn get_ac_queue(&mut self, ac: u8) -> Vec<usize> {
+        // Collect all the queue values for the given `ac` from multiple IPs
+        self.query.iter_mut().map(|(_ip, query)| {
+            // Return the value for `ac`, defaulting to 0 if not found
+            query.get_queue_info().get(&ac).cloned().unwrap_or(0)
+        }).collect() // Collect all found values into a Vec<usize>
+    }
+    
 }
 
 pub fn mon_mac_thread(
-    mut mac_mon: MACQueueMonitor,
+    mac_mon: GuardedMACMonitor,
 ) -> thread::JoinHandle<()> {
     let mon_thread = thread::spawn(move || {
         let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
             .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
-        let start_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
 
-        let mut counter = 0;
-        let mut logger = File::create( "logs/mac-info.txt" ).unwrap();
-
-        let mut log_line = String::new();
         loop {
-            counter += 1;
-
-            mac_mon.query.iter_mut().for_each(|(_ip, query)| {
-                query.update_queue_info();
-                // Capture the MAC queue info along with timestamp
-                log_line.push_str(&format!(
-                    "{:?}\n",
-                    // current_time,
-                    query.get_queue_info(),
-                    
-                ));
-            });
-
-            // Write to file every 1000 iterations or after 1 second
-            if counter % 1000 == 0 {
-                logger.write_all(log_line.as_bytes())
-                    .expect("Failed to write to log file");
-                log_line.clear();
+            let deadline = SystemTime::now() + Duration::from_nanos(300_000_000); // 300ms           
+            match mac_mon.lock() {
+                Ok(mut mac_mon) => {
+                    // Update the queue info for each IP
+                    mac_mon.query.iter_mut().for_each(|(_ip, query)| {
+                        query.update_queue_info();
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to lock MACQueueMonitor: {}", e);
+                    continue;
+                }
             }
 
-            spin_sleeper.sleep( Duration::from_secs_f64(start_time + counter as f64 * 0.005 - SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64()) );
-
+            if let Ok(remaining_time) = deadline.duration_since(SystemTime::now()) {
+                spin_sleeper.sleep(remaining_time);
+            }
         }
     });
     mon_thread

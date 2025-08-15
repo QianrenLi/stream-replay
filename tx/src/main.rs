@@ -11,6 +11,7 @@ mod utils;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use log::info;
 
 use core::logger::init_log;
@@ -57,19 +58,21 @@ fn main() {
     let window_size = manifest.window_size;
     println!("Sliding Window Size: {}.", window_size);
 
-    if args.mon_mac {
-        mon_mac_thread(MACQueueMonitor::new(&manifest.tx_ipaddrs));
-    }
+    let mac_monitor = Arc::new(Mutex::new(MACQueueMonitor::new(&manifest.tx_ipaddrs)));
 
     // spawn the source thread
     let mut sources:HashMap<_,_> = streams.into_iter().map(|stream| {
-        let src = SourceManager::new(stream, window_size);
+        let src = SourceManager::new(stream, window_size, Arc::clone(&mac_monitor));
         let name = src.name.clone();
         (name, src)
     }).collect();
     let _handles:Vec<_> = sources.iter_mut().enumerate().map(|(i,(_name,src))| {
         src.start(i+1, String::from("0.0.0.0"))
     }).collect();
+
+    if args.mon_mac {
+        mon_mac_thread(mac_monitor);
+    }
 
     // start global IPC
     let ipc = IPCDaemon::new( sources, args.ipc_port, String::from("0.0.0.0"));

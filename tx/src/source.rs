@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
@@ -10,6 +12,7 @@ use ndarray_npy::read_npy;
 use core::packet::*;
 use crate::conf::{StreamParam, ConnParams};
 use crate::dispatcher::dispatch;
+use crate::statistic::mac_queue::GuardedMACMonitor;
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
@@ -55,18 +58,21 @@ fn process_queue(
     throttler: &GuardedThrottler, 
     tx_part_ctler: &GuardedTxPartCtler, 
     socket_infos: &SocketInfo, 
-    stop_time: &SystemTime
-) {
+    stop_time: &SystemTime,
+    recorder: Option<&File>,
+) { 
     // Precompute unix epoch once
     while SystemTime::now() < *stop_time {
         // Compute current time once per iteration
         if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
             let schedule_param = SchedulingParameters {
+                seq: packet.seq as usize,
                 arrival_time: packet.arrival_time,
                 current_time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
                 offset: packet.offset as usize,
                 num: packet.num as usize,
             };
+            
             // Get IP address with minimal lock time
             match tx_part_ctler.lock() {
                 Ok(mut controller) => {
@@ -106,6 +112,13 @@ fn process_queue(
             break;
         }
     }
+    if let Some(mut recorder) = recorder {
+        recorder.write_all(tx_part_ctler.lock().unwrap().log_str.as_bytes())
+            .expect("Failed to write to recorder file");
+    }
+    
+    tx_part_ctler.lock().unwrap().log_str.clear(); // Using clear() instead of setting to an empty string
+    
 }
 
 pub fn stream_thread(
@@ -114,7 +127,7 @@ pub fn stream_thread(
     rtt_tx: Option<RttSender>, 
     params: ConnParams, 
     socket_infos: SocketInfo, 
-    dest: BufferReceiver
+    dest: BufferReceiver,
 ) {
     let mut template = PacketWithMeta::new(params.port);
     let stop_time = SystemTime::now().checked_add(Duration::from_secs_f64(params.duration[1])).unwrap();
@@ -139,7 +152,7 @@ pub fn stream_thread(
         }
 
         // Process queue
-        process_queue(&throttler, &tx_part_ctler, &socket_infos, &stop_time);
+        process_queue(&throttler, &tx_part_ctler, &socket_infos, &stop_time, None);
     }
 
     // Reset throttler
@@ -161,6 +174,8 @@ pub fn video_thread(
     let mut loops = 0;
     let mut idx = start_offset;
     let stop_time = SystemTime::now().checked_add(Duration::from_secs_f64(duration[1])).unwrap();
+
+    let recorder = File::create("logs/recorder.txt").expect("Failed to create recorder file");
 
     spin_sleeper.sleep(Duration::from_secs_f64(duration[0]));
     while SystemTime::now() <= stop_time {
@@ -192,7 +207,7 @@ pub fn video_thread(
         };
 
         // Process queue
-        process_queue(&throttler, &tx_part_ctler, &socket_infos, &deadline);
+        process_queue(&throttler, &tx_part_ctler, &socket_infos, &deadline, Some(&recorder));
 
         // Sleep until next arrival
         if let Ok(remaining_time) = deadline.duration_since(SystemTime::now()) {
@@ -215,7 +230,6 @@ pub fn source_thread(
     let (start_offset, duration) = (params.start_offset, params.duration);
     let mut template = PacketWithMeta::new(params.port);
     let spin_sleeper = spin_sleep::SpinSleeper::new(100_000).with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
-
     let mut loops = 0;
     let mut idx = start_offset;
     let stop_time = SystemTime::now().checked_add(Duration::from_secs_f64(duration[1])).unwrap();
@@ -252,7 +266,7 @@ pub fn source_thread(
         };
 
         // Process queue
-        process_queue(&throttler, &tx_part_ctler, &socket_infos, &deadline);
+        process_queue(&throttler, &tx_part_ctler, &socket_infos, &deadline, None);
 
         // Sleep until next arrival
         if let Ok(remaining_time) = deadline.duration_since(SystemTime::now()) {
@@ -282,7 +296,7 @@ pub struct SourceManager{
 }
 
 impl SourceManager {
-    pub fn new(stream: StreamParam, window_size:usize) -> Self {
+    pub fn new(stream: StreamParam, window_size:usize, mac_monitor: GuardedMACMonitor) -> Self {
         let (StreamParam::UDP(ref params) | StreamParam::TCP(ref params)) = stream;
         let mut name = stream.name();
 
@@ -294,7 +308,7 @@ impl SourceManager {
             RateThrottler::new(name.clone(), params.throttle, window_size, params.no_logging, false)
         ));
         let tx_part_ctler = Arc::new(Mutex::new(
-            TxPartCtler::new(params.tx_part, params.policy)
+            TxPartCtler::new(params.tx_part, params.policy, mac_monitor)
         ));
 
         let rtt =  match params.calc_rtt {
