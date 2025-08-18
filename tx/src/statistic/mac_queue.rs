@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::{fs};
+use std::{fs, io};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
@@ -54,11 +54,21 @@ impl MACQueueQuery {
     }
 
     fn update_queue_info(&mut self){
+        // Read the contents of the proc file
+        let data = match fs::read_to_string(&self.proc_file) {
+            Ok(s) => s,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                // device not up or driver not exposing the file yet — just pass
+                return;
+            }
+            Err(e) => {
+                eprintln!("Failed to read {}: {}", self.proc_file, e);
+                return;
+            }
+        };
+
         // Clear the existing queue info
         self.queue_info.clear();
-
-        // Read the contents of the proc file
-        let data = fs::read_to_string(&self.proc_file).expect("Failed to read PROC_FILE");
 
         // Regex to match lines with "pkt_num" and "ac" (excluding BCN)
         // let re = Regex::new(r"head:[^,]+,\s+tail:[^,]+,\s+pkt_num:(\d+),\s+macid:\d+,?\s*ac:(\d+)").unwrap();
