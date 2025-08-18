@@ -56,6 +56,7 @@ fn main() {
     // parse the manifest file
     let streams:Vec<_> = manifest.streams.into_iter().filter_map( |x| x.validate(root, args.duration) ).collect();
     let window_size = manifest.window_size;
+    let ipc_port = manifest.ipc_port.unwrap_or(11112);
     println!("Sliding Window Size: {}.", window_size);
 
     let mac_monitor = Arc::new(Mutex::new(MACQueueMonitor::new(&manifest.tx_ipaddrs)));
@@ -75,7 +76,7 @@ fn main() {
     }
 
     // start global IPC
-    let ipc = IPCDaemon::new( sources, args.ipc_port, String::from("0.0.0.0"));
+    let ipc = IPCDaemon::new( sources, ipc_port, String::from("0.0.0.0"));
     ipc.start_loop( args.duration);
 
     std::process::exit(0); //force exit

@@ -103,5 +103,6 @@ pub struct Manifest {
     pub orchestrator: Option<String>,
     pub window_size: usize,
     pub streams: Vec<StreamParam>,
-    pub tx_ipaddrs: Vec<String>
+    pub tx_ipaddrs: Vec<String>,
+    pub ipc_port: Option<u16>,
 }
