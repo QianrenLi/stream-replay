@@ -16,7 +16,7 @@ use crate::statistic::mac_queue::GuardedMACMonitor;
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
-use crate::tx_part_ctl::{SchedulingParameters, TxPartCtler};
+use crate::tx_part_ctl::{SchedulingMessage, TxPartCtler};
 use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
@@ -65,7 +65,7 @@ fn process_queue(
     while SystemTime::now() < *stop_time {
         // Compute current time once per iteration
         if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
-            let schedule_param = SchedulingParameters {
+            let schedule_param = SchedulingMessage {
                 seq: packet.seq as usize,
                 arrival_time: packet.arrival_time,
                 current_time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
@@ -308,7 +308,7 @@ impl SourceManager {
             RateThrottler::new(name.clone(), params.throttle, window_size, params.no_logging, false)
         ));
         let tx_part_ctler = Arc::new(Mutex::new(
-            TxPartCtler::new(params.tx_part, params.policy, mac_monitor)
+            TxPartCtler::new(params.policy, params.policy_parameters, mac_monitor)
         ));
 
         let rtt =  match params.calc_rtt {
@@ -336,12 +336,6 @@ impl SourceManager {
         }
     }
 
-    pub fn set_tx_parts(&self, tx_part:f64) {
-        if let Ok(ref mut tx_part_ctler) = self.tx_part_ctler.lock() {
-            tx_part_ctler.set_tx_part(tx_part);
-        }
-    }
-
     pub fn statistics(&self) -> Option<Statistics> {
         let now = SystemTime::now();
         if now < self.start_timestamp || now > self.stop_timestamp {
@@ -358,11 +352,8 @@ impl SourceManager {
             (None, None, None, None)
         };
     
-        let tx_parts = self.tx_part_ctler.lock().ok()?.tx_part.clone();
 
-        
-    
-        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, tx_parts, throttle })
+        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, throttle })
     }
 
     pub fn start(&mut self, index:usize, tx_ipaddr:String) -> JoinHandle<()> {

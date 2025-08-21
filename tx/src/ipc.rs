@@ -9,14 +9,13 @@ pub struct Statistics {
     pub outage_rate : Option<f64>,
     pub ch_outage_rates: Option<Vec<f64>>,
     pub throughput: f64,
-    pub tx_parts: f64,
     pub throttle: f64,
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
 enum RequestValue {
     Throttle(HashMap<String, f64>),
-    TxPart(HashMap<String, f64>),
+    // TxPart(HashMap<String, f64>),
     Statistics(HashMap<String, f64>),
 }
 
@@ -58,13 +57,13 @@ impl IPCDaemon {
                 return None;
             },
 
-            RequestValue::TxPart(data) => {
-                let _:Vec<_> = data.iter().map(|(name, value)| {
-                    self.sources[name].set_tx_parts(value.clone());
-                }).collect();
-                //
-                return None;
-            },
+            // RequestValue::TxPart(data) => {
+            //     let _:Vec<_> = data.iter().map(|(name, value)| {
+            //         self.sources[name].set_tx_parts(value.clone());
+            //     }).collect();
+            //     //
+            //     return None;
+            // },
 
             RequestValue::Statistics(_)  => {
                 let body = Some( self.sources.iter().filter_map(|(name,src)| {

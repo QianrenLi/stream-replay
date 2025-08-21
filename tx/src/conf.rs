@@ -3,7 +3,7 @@ use rand::prelude::*;
 use rand::distributions::Standard;
 use serde::{Serialize, Deserialize};
 
-use crate::{link::Link, source::STREAM_PROTO, tx_part_ctl::Policy};
+use crate::{link::Link, source::STREAM_PROTO, tx_part_ctl::{Policy, PolicyParameter}};
 
 const fn _default_duration() -> [f64; 2] { [0.0, f64::MAX] }
 const fn _default_loops() -> usize { usize::MAX }
@@ -28,8 +28,8 @@ pub struct ConnParams {
     #[serde(default)] pub calc_rtt: bool,   //default: false
     #[serde(default)] pub no_logging: bool, //default: false
     #[serde(default)] pub links: Vec<Link>, //default: [[]]
-    #[serde(default)] pub tx_part: f64,     //default: []
-    #[serde(default)] pub policy: Policy,   //default: []
+    #[serde(default)] pub policy: Policy,   //default: ""
+    #[serde(default)] pub policy_parameters: PolicyParameter,   //default: []
 }
 
 
