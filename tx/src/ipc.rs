@@ -1,6 +1,6 @@
 use std::{net::UdpSocket, collections::HashMap, time::{Duration, SystemTime}};
 use serde::{Serialize, Deserialize};
-use crate::source::SourceManager;
+use crate::{source::SourceManager, tx_part_ctl::PolicyParameter};
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct Statistics {
@@ -15,7 +15,7 @@ pub struct Statistics {
 #[derive(Serialize, Deserialize, Debug,Clone)]
 enum RequestValue {
     Throttle(HashMap<String, f64>),
-    // TxPart(HashMap<String, f64>),
+    PolicyParameters(HashMap<String, PolicyParameter>),
     Statistics(HashMap<String, f64>),
 }
 
@@ -57,13 +57,13 @@ impl IPCDaemon {
                 return None;
             },
 
-            // RequestValue::TxPart(data) => {
-            //     let _:Vec<_> = data.iter().map(|(name, value)| {
-            //         self.sources[name].set_tx_parts(value.clone());
-            //     }).collect();
-            //     //
-            //     return None;
-            // },
+            RequestValue::PolicyParameters(data) => {
+                let _:Vec<_> = data.iter().map(|(name, value)| {
+                    self.sources[name].set_policy_parameters(*value);
+                }).collect();
+                //
+                return None;
+            },
 
             RequestValue::Statistics(_)  => {
                 let body = Some( self.sources.iter().filter_map(|(name,src)| {

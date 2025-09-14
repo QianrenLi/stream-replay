@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug,Clone, Default, Copy)]
 pub enum Policy {
-    Proposed,
+    QueueAware,
     ConditionalRR,
     #[default]
     HardThreshold,
@@ -60,7 +60,7 @@ impl TxPartCtler {
     //     tx_part * num
     pub fn get_packet_state(&mut self, params: SchedulingMessage) -> Option<PacketType> {
         match self.policy {
-            Policy::Proposed => {
+            Policy::QueueAware => {
                 let is_last = params.offset == params.num - 1;
                 let ac1_info = self.mac_monitor.lock().unwrap().get_ac_queue(1);
                 self.log_str.push_str(&format!("{} {} {} {:?} ", params.seq, params.offset, params.num, ac1_info));
@@ -93,9 +93,6 @@ impl TxPartCtler {
                 } else {
                     if is_last { Some(PacketType::LastPacketInFirstLink) } else { Some(PacketType::FirstLink) }
                 }
-            },
-            _ => {
-                panic!("Unsupported policy for TxPartCtler");
             }
         }
 

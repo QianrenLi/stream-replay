@@ -16,7 +16,7 @@ use crate::statistic::mac_queue::GuardedMACMonitor;
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
-use crate::tx_part_ctl::{SchedulingMessage, TxPartCtler};
+use crate::tx_part_ctl::{PolicyParameter, SchedulingMessage, TxPartCtler};
 use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
@@ -334,6 +334,12 @@ impl SourceManager {
         if let Ok(ref mut throttler) = self.throttler.lock() {
             throttler.throttle = throttle;
         }
+    }
+
+    pub fn set_policy_parameters(&self, parameters: PolicyParameter) {
+        if let Ok(ref mut tx_part_ctler) = self.tx_part_ctler.lock() {
+            tx_part_ctler.policy_parameters = parameters;
+        };
     }
 
     pub fn statistics(&self) -> Option<Statistics> {
