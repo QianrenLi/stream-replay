@@ -16,7 +16,8 @@ use crate::statistic::mac_queue::GuardedMACMonitor;
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
-use crate::tx_part_ctl::{PolicyParameter, SchedulingMessage, TxPartCtler};
+use crate::policies::{PolicyParameter, SchedulingMessage};
+use crate::tx_part_ctl::TxPartCtler;
 use crate::utils::trace_reader::read_packets;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
@@ -64,18 +65,16 @@ fn process_queue(
     // Precompute unix epoch once
     while SystemTime::now() < *stop_time {
         // Compute current time once per iteration
-        if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {
-            let schedule_param = SchedulingMessage {
-                seq: packet.seq as usize,
-                arrival_time: packet.arrival_time,
-                current_time: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
-                offset: packet.offset as usize,
-                num: packet.num as usize,
-            };
-            
+        if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {            
             // Get IP address with minimal lock time
             match tx_part_ctler.lock() {
                 Ok(mut controller) => {
+                    let schedule_param = SchedulingMessage::new(
+                        packet, 
+                        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
+                        controller.blocked_signals.clone(),
+                        controller.mac_monitor.lock().unwrap().get_ac_queue(1),
+                    );
                     if let Some(packet_type) = controller.get_packet_state(schedule_param){
                         packet.set_indicator(packet_type);
                     } else {

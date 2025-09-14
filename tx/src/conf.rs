@@ -3,7 +3,7 @@ use rand::prelude::*;
 use rand::distributions::Standard;
 use serde::{Serialize, Deserialize};
 
-use crate::{link::Link, source::STREAM_PROTO, tx_part_ctl::{Policy, PolicyParameter}};
+use crate::{link::Link, source::STREAM_PROTO, policies::{PolicyParameter,Policy}};
 
 const fn _default_duration() -> [f64; 2] { [0.0, f64::MAX] }
 const fn _default_loops() -> usize { usize::MAX }

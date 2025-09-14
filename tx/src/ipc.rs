@@ -1,6 +1,6 @@
 use std::{net::UdpSocket, collections::HashMap, time::{Duration, SystemTime}};
 use serde::{Serialize, Deserialize};
-use crate::{source::SourceManager, tx_part_ctl::PolicyParameter};
+use crate::{source::SourceManager, policies::PolicyParameter};
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct Statistics {
