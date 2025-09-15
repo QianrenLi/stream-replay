@@ -90,6 +90,7 @@ fn handle_rtt(
         if args.rx_mode && data.tx.is_some() {
             let res = _record.gather();
             if let Some(ref tx) = data.tx {
+                println!("Send RTT data for res length {}", res.len());
                 tx.send(res).unwrap();
             }
         }

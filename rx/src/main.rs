@@ -27,7 +27,7 @@ fn main() {
     
     if args.rx_mode{
         std::thread::spawn(move || {
-            forward::forward_thread(args.forward_port.clone(), _rx);
+            forward::forward_thread( _rx);
         });
     }
 
