@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use core::socket::{*};
 
-use crate::link::Link;
+use crate::conf::Link;
 use crate::source::SocketInfo;
 
 pub fn dispatch(links: Vec<Link>, tos:u8) -> SocketInfo {

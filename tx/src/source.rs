@@ -19,9 +19,12 @@ use crate::ipc::Statistics;
 use crate::policies::{PolicyParameter, SchedulingMessage};
 use crate::tx_part_ctl::TxPartCtler;
 use crate::utils::trace_reader::read_packets;
+use crate::version_manager::VersionManager;
 
 type GuardedThrottler = Arc<Mutex<RateThrottler>>;
 type GuardedTxPartCtler = Arc<Mutex<TxPartCtler>>;
+type GuardedVersionManager = Arc<Mutex<Option<VersionManager>>>;
+
 pub type SocketInfo = HashMap<usize, (UdpSocket, String)>;
 
 pub const STREAM_PROTO: &str = "stream://";
@@ -44,7 +47,6 @@ fn generate_packets(
         } else {
             MAX_PAYLOAD_LEN as u16
         };
-
         template.set_length(length);
         template.set_offset(offset);
         if let Some(buf) = buffer {
@@ -161,34 +163,43 @@ pub fn stream_thread(
 pub fn video_thread(
     throttler: GuardedThrottler, 
     tx_part_ctler: GuardedTxPartCtler, 
+    version_manager: GuardedVersionManager,
     rtt_tx: Option<RttSender>, 
     params: ConnParams, 
     socket_infos: SocketInfo
 ) {
-    let trace: Vec<(u64, Vec<u8>)> = read_packets(&params.npy_file).expect("loading failed.");
+    let mut trace = read_packets(version_manager.lock().unwrap().as_mut().unwrap().next()).expect("loading failed.");
+    let mut reload = false;
     let (start_offset, duration) = (params.start_offset, params.duration);
-    let mut template = PacketWithMeta::new(params.port);
     let spin_sleeper = spin_sleep::SpinSleeper::new(100_000).with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
-
-    let mut loops = 0;
-    let mut idx = start_offset;
     let stop_time = SystemTime::now().checked_add(Duration::from_secs_f64(duration[1])).unwrap();
-
+    let mut template = PacketWithMeta::new(params.port);
     let recorder = File::create("logs/recorder.txt").expect("Failed to create recorder file");
-
+    let mut idx = start_offset;
     spin_sleeper.sleep(Duration::from_secs_f64(duration[0]));
     while SystemTime::now() <= stop_time {
-        loops += 1;
+        if reload {
+            reload = false;
+            idx = start_offset;
+            trace = read_packets(version_manager.lock().unwrap().as_mut().unwrap().next()).expect("loading failed.")
+        };
 
-        let deadline = if loops < params.loops {
+        let deadline = {
             let interval_ns = trace[idx].0;
             let size_bytes = trace[idx].1.len();
+            let buffer = &trace[idx].1;
+
+            idx = idx + 1;
+            if idx == trace.len() {
+                reload = true;
+            }
+
             let (_num, _remains) = (size_bytes / MAX_PAYLOAD_LEN, size_bytes % MAX_PAYLOAD_LEN);
             let num = _num + if _remains > 0 { 1 } else { 0 };
             template.next_seq(num);
 
             // Generate packets
-            let packets = generate_packets(_remains, &mut template,  Some(&trace[idx].1));
+            let packets = generate_packets(_remains, &mut template,  Some(buffer));
 
             // Append to application-layer queue
             throttler.lock().unwrap().prepare(packets);
@@ -198,11 +209,7 @@ pub fn video_thread(
                 r_tx.send(template.seq).unwrap();
             }
 
-            // Next iteration
-            idx = (idx + 1) % trace.len();
             SystemTime::now() + Duration::from_nanos(interval_ns)
-        } else {
-            stop_time
         };
 
         // Process queue
@@ -289,7 +296,8 @@ pub struct SourceManager{
     //
     throttler: GuardedThrottler,
     rtt: Option<RttRecorder>,
-    tx_part_ctler: Arc<Mutex<TxPartCtler>>,
+    tx_part_ctler: GuardedTxPartCtler,
+    version_manager: GuardedVersionManager,
     //
     socket_infos: Vec<SocketInfo>,
 }
@@ -309,6 +317,13 @@ impl SourceManager {
         let tx_part_ctler = Arc::new(Mutex::new(
             TxPartCtler::new(params.policy, params.policy_parameters, mac_monitor)
         ));
+        let version_manager = Arc::new(Mutex::new( 
+            if params.npy_file.ends_with(".json") {
+                Some(VersionManager::new(&params.npy_file))
+            } else{
+                None
+            })
+        );
 
         let rtt =  match params.calc_rtt {
             false => None,
@@ -326,7 +341,7 @@ impl SourceManager {
             (vec![], vec![])
         };
 
-        Self{ name, stream, throttler, rtt, tx_part_ctler, socket_infos, start_timestamp, stop_timestamp, source, dest }
+        Self{ name, stream, throttler, rtt, tx_part_ctler, version_manager, socket_infos, start_timestamp, stop_timestamp, source, dest }
     }
 
     pub fn throttle(&self, throttle:f64) {
@@ -338,6 +353,12 @@ impl SourceManager {
     pub fn set_policy_parameters(&self, parameters: PolicyParameter) {
         if let Ok(ref mut tx_part_ctler) = self.tx_part_ctler.lock() {
             tx_part_ctler.policy_parameters = parameters;
+        };
+    }
+
+    pub fn set_version(&self, version: u32) {
+        if let Ok(ref mut version_manager) = self.version_manager.lock() {
+            version_manager.as_mut().unwrap().set_version(version);
         };
     }
 
@@ -356,14 +377,17 @@ impl SourceManager {
         } else {
             (None, None, None, None)
         };
-    
 
-        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, throttle })
+        let (version, bitrate) = self.version_manager.lock().ok()?.as_ref()?.get_version_bitrate();
+    
+        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, throttle, version, bitrate })
     }
 
     pub fn start(&mut self, index:usize, tx_ipaddr:String) -> JoinHandle<()> {
         let throttler = Arc::clone(&self.throttler);
         let tx_part_ctler = Arc::clone(&self.tx_part_ctler);
+        let version_manager = Arc::clone(&self.version_manager);
+
         let rtt_tx = match self.rtt {
             Some(ref mut rtt) => Some( rtt.start(tx_ipaddr) ),
             None => None
@@ -382,11 +406,11 @@ impl SourceManager {
                 let dest = dest.unwrap();
                 stream_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos, dest)
             }
-            else if params.npy_file.ends_with(".bin") {
-                video_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos);
+            else if params.npy_file.ends_with(".npy") {
+                source_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos); 
             }
             else {
-                source_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos);
+                video_thread(throttler, tx_part_ctler, version_manager, rtt_tx, params, socket_infos);
             }
         });
 

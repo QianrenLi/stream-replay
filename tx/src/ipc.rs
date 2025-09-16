@@ -10,6 +10,8 @@ pub struct Statistics {
     pub ch_outage_rates: Option<Vec<f64>>,
     pub throughput: f64,
     pub throttle: f64,
+    pub version: u32,
+    pub bitrate: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
@@ -17,6 +19,7 @@ enum RequestValue {
     Throttle(HashMap<String, f64>),
     PolicyParameters(HashMap<String, PolicyParameter>),
     Statistics(HashMap<String, f64>),
+    Vertion(HashMap<String, u32>),
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
@@ -60,6 +63,14 @@ impl IPCDaemon {
             RequestValue::PolicyParameters(data) => {
                 let _:Vec<_> = data.iter().map(|(name, value)| {
                     self.sources[name].set_policy_parameters(*value);
+                }).collect();
+                //
+                return None;
+            },
+
+            RequestValue::Vertion(data) => {
+                let _:Vec<_>  = data.iter().map(|(name, value)| {
+                    self.sources[name].set_version(*value);
                 }).collect();
                 //
                 return None;

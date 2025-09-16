@@ -3,11 +3,31 @@ use rand::prelude::*;
 use rand::distributions::Standard;
 use serde::{Serialize, Deserialize};
 
-use crate::{link::Link, source::STREAM_PROTO, policies::{PolicyParameter,Policy}};
+use crate::{source::STREAM_PROTO, policies::{PolicyParameter,Policy}};
 
 const fn _default_duration() -> [f64; 2] { [0.0, f64::MAX] }
 const fn _default_loops() -> usize { usize::MAX }
 fn _random_value<T>() -> T where Standard: Distribution<T> { rand::thread_rng().gen() }
+
+use serde::de::Deserializer;
+#[derive(Serialize, Debug,Clone)]
+pub struct Link {
+    pub tx_ipaddr: String,
+    pub rx_ipaddr: String,
+}
+
+impl<'de> Deserialize<'de> for Link {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let arr: [String; 2] = Deserialize::deserialize(deserializer)?;
+        Ok(Link {
+            tx_ipaddr: arr[0].clone(),
+            rx_ipaddr: arr[1].clone(),
+        })
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct ConnParams {

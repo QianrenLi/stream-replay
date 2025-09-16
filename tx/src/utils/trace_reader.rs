@@ -24,7 +24,6 @@ pub fn read_packets(packets_file: &str) -> io::Result<Vec<(u64, Vec<u8>)>> {
         // Read the actual data
         let mut data = vec![0u8; data_length as usize];
         file.read_exact(&mut data)?;
-
         // Store the packet with interval_ns and data
         stored_packets.push((interval_ns, data));
     }

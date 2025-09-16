@@ -1,76 +1,99 @@
-use std::sync::mpsc::{Receiver};
-use ffmpeg_next::{codec::Id::H264, codec::decoder, packet::Packet, frame::Video as Frame};
-use opencv::{core::Vector, highgui, imgproc, prelude::*};
 use std::error::Error;
+use std::sync::mpsc::Receiver;
 
-fn plane_to_mat(frame: &Frame, plane_index: usize, width: u32, height: u32, r_with: u32, r_height: u32) -> opencv::Result<Mat> {
-    let data = frame.data(plane_index);
-    let mat = Mat::new_rows_cols_with_data(height as i32, width as i32, data)?.try_clone()?;
-    let mut resized_mat = Mat::default();
-    imgproc::resize(&mat, &mut resized_mat, opencv::core::Size::new(r_with as i32, r_height as i32), 0.0, 0.0, imgproc::INTER_LINEAR)?;
-    Ok(resized_mat)
-}
-
+use ffmpeg_next::{
+    codec::{decoder, Id::H264},
+    frame::Video as Frame,
+    packet::Packet,
+    format::Pixel,
+    software::scaling::{context::Context as SwsContext, flag::Flags},
+};
+use opencv::{core, highgui, prelude::*};
 
 pub fn forward_thread(rx: Receiver<Vec<u8>>) -> Result<(), Box<dyn Error>> {
-    // Initialize FFmpeg
     ffmpeg_next::init()?;
+    // ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Debug);
 
-    // Find the H.264 decoder codec
-    let h264_codec = decoder::find(H264).expect("H264 decoder not found");
+    // H.264 decoder
+    let h264 = decoder::find(H264).expect("H264 decoder not found");
+    let mut dec = decoder::new().open_as(h264)?.video()?;
 
-    // Create a video decoder context for H.264
-    let mut video_decoder = decoder::new().open_as(h264_codec)?.video()?;
+    // Scaler + last seen input format
+    let mut scaler: Option<SwsContext> = None;
+    let dst_w = 1280;
+    let dst_h = 720;
 
-    // Initialize OpenCV window for displaying video frames
+    let mut last_src_w: u32 = 0;
+    let mut last_src_h: u32 = 0;
+    let mut last_src_fmt: Pixel = Pixel::None;
+
     highgui::named_window("Decoded Frame", highgui::WINDOW_AUTOSIZE)?;
 
-    // Loop to receive frames from the channel
     loop {
-        match rx.recv() {
-            Ok(encoded_frames) => {
-                // Create a packet with the received encoded frames (Vec<u8>)
-                let mut packet = Packet::copy(&encoded_frames);
-                video_decoder.send_packet(&packet)?;
+        let encoded = match rx.recv() {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("Receiver closed: {e}");
+                break;
+            }
+        };
 
-                let mut frame = Frame::empty();
+        let encoded_frame = &encoded;
 
-                // Receive the decoded frames and process them
-                while let Ok(()) = video_decoder.receive_frame(&mut frame) {
-                    // Convert the decoded frame to OpenCV Mat
-                    let height = frame.height();
-                    let width = frame.width();
+        let pkt = Packet::copy(&encoded_frame);
+        dec.send_packet(&pkt)?;
 
-                    let new_width = 1280;
-                    let new_height = 960;
+        let mut in_frame = Frame::empty();
+        while dec.receive_frame(&mut in_frame).is_ok() {
 
-                    let mat_y = plane_to_mat(&frame, 0, width, height, new_width, new_height)?;
-                    let mat_u = plane_to_mat(&frame, 1, width / 2, height / 2, new_width, new_height)?;
-                    let mat_v = plane_to_mat(&frame, 2, width / 2, height / 2, new_width, new_height)?;
+            let src_fmt = in_frame.format();
+            let src_w = in_frame.width() ;
+            let src_h = in_frame.height() ;
 
-                    let mut mat = Vector::<Mat>::new();
-                    mat.push(mat_y);
-                    mat.push(mat_u);
-                    mat.push(mat_v);
-                    let mut merged = Mat::default();  
-                    opencv::core::merge(&mat, &mut merged)?;
-                    
-                    let mut bgr = Mat::default();
-                    imgproc::cvt_color(&merged, &mut bgr, imgproc::COLOR_YUV2BGR, 0)?;
+            if scaler.is_none() || src_w != last_src_w || src_h != last_src_h || src_fmt != last_src_fmt {
+                scaler = Some(SwsContext::get(
+                    src_fmt, src_w, src_h,
+                    Pixel::BGR24, dst_w, dst_h, Flags::BILINEAR,
+                )?);
+                last_src_w = src_w ;
+                last_src_h = src_h ;
+                last_src_fmt = src_fmt;
+            }
 
+            // Prepare destination frame (must allocate!)
+            let mut out = Frame::empty();
+            out.set_format(Pixel::BGR24);
+            out.set_width(dst_w);
+            out.set_height(dst_h);
+            unsafe {
+                out.alloc(Pixel::BGR24, dst_w as u32, dst_h as u32);
+            }
 
-                    // Display the resized frame using OpenCV
-                    highgui::imshow("Decoded Frame", &bgr)?;
+            // Scale/convert
+            scaler.as_mut().unwrap().run(&in_frame, &mut out)?;
 
-                    // Wait for 1 ms and handle events (like closing the window)
-                    if highgui::wait_key(1)? == 27 { // 27 is the ESC key
-                        break;
-                    }
+            // Wrap FFmpeg buffer into an OpenCV Mat by copying rows (handles stride)
+            let data = out.data(0);
+            let src_stride = out.stride(0) as usize;     // bytes per row in FFmpeg buffer
+            let row_bytes = (dst_w as usize) * 3;        // BGR24
+            let total_bytes = (dst_h as usize) * row_bytes;
+
+            let mut mat = unsafe { core::Mat::new_rows_cols(dst_h as i32, dst_w as i32, core::CV_8UC3) }?;
+            {
+                let dst_ptr = mat.data_mut(); // *mut u8
+                let dst = unsafe { std::slice::from_raw_parts_mut(dst_ptr, total_bytes) };
+                for y in 0..(dst_h as usize) {
+                    let src_off = y * src_stride;
+                    let dst_off = y * row_bytes;
+                    dst[dst_off..dst_off + row_bytes]
+                        .copy_from_slice(&data[src_off..src_off + row_bytes]);
                 }
             }
-            Err(e) => {
-                eprintln!("Error receiving data from channel: {}", e);
-                break;
+
+            highgui::imshow("Decoded Frame", &mat)?;
+
+            if highgui::wait_key(1)? == 27 {
+                return Ok(());
             }
         }
     }
