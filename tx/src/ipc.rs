@@ -3,16 +3,21 @@ use serde::{Serialize, Deserialize};
 use crate::{policies::PolicyParameter, source::SourceManager, statistic::mac_queue::MACQueuesSnapshot};
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
-pub struct Statistics {
-    pub rtt: Option<f64>,
-    pub channel_rtts: Option<Vec<f64>>,
-    pub outage_rate : Option<f64>,
-    pub ch_outage_rates: Option<Vec<f64>>,
+pub struct FlowStatistics {
+    pub rtt: f64,
+    pub outage_rate: f64,
     pub throughput: f64,
     pub throttle: f64,
     pub version: u32,
     pub bitrate: u64,
-    pub mac_info: MACQueuesSnapshot,
+    pub app_buff: usize,
+    pub frame_count: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug,Clone)]
+pub struct Statistics {
+    pub flow_stat: HashMap<String, FlowStatistics>,
+    pub device_stat: MACQueuesSnapshot,
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
@@ -32,7 +37,7 @@ enum RequestValue {
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
 enum ResponseValue {
-    Statistics(HashMap<String,Statistics>),
+    Statistics(Statistics),
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
@@ -88,14 +93,20 @@ impl IPCDaemon {
             },
 
             RequestValue::Statistics(_)  => {
-                let body = Some( self.sources.iter().filter_map(|(name,src)| {
+                let flow_stat = Some( self.sources.iter().filter_map(|(name,src)| {
                     match src.statistics() {
                         Some(stat) => Some(( name.clone(), stat )),
                         None => None
                     }
-                }).collect() );
-                //
-                return Some(Response{ cmd: ResponseValue::Statistics(body.unwrap())});
+                }).collect() ).unwrap();
+
+                //get device statistics from only one source
+                let first_source = self.sources.values().next().unwrap();
+                let device_stat = first_source.device_statistics();
+
+                return Some(Response{ cmd: ResponseValue::Statistics(
+                    Statistics{ flow_stat, device_stat }
+                ) });
             }
         }
     }

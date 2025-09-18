@@ -1,39 +1,23 @@
-use std::cmp::Ordering;
+// use std::cmp::Ordering;
 #[derive(Debug, Clone)]
 struct RTTEntry {
     seq: usize,
     rtt: f64,
-    channel_rtts: Vec<Option<f64>>,
-    visited_rtt: Vec<bool>,
-    completed: bool,
+    delta: f64,
 }
 
 impl RTTEntry {
-    fn new(seq: usize, max_links: usize) -> Self {
+    fn new(seq: usize) -> Self {
         RTTEntry {
             seq,
             rtt: 0.0,
-            channel_rtts: vec![None; max_links],
-            visited_rtt: vec![false; max_links + 1],
-            completed: false,
+            delta: 0.0,
         }
     }
 
-    fn update_value(&mut self, channel: u8, value: f64, delta : f64) {
+    fn update_value(&mut self, value: f64, delta : f64) {
         self.rtt = value;
-        match channel {
-            0 => {
-                self.completed = true;
-                self.channel_rtts[0] = Some(value);
-                self.channel_rtts[1] = Some(value + delta);
-            }
-            1 => {
-                self.completed = true;
-                self.channel_rtts[1] = Some(value);
-                self.channel_rtts[0] = Some(value - delta);
-            }
-            _ => {panic!("Invalid packet type")}
-        }
+        self.delta = delta;
     }
 }
 
@@ -61,90 +45,41 @@ impl RttRecords {
         match &mut self.queue[index] {
             Some(entry) => {
                 if entry.seq == seq {
-                    entry.update_value(channel, rtt, delta);
+                    entry.update_value(rtt, delta);
                 } else {
-                    self.queue[index] = Some(RTTEntry::new(seq, self.max_links));
-                    self.queue[index].as_mut().unwrap().update_value(channel, rtt, delta);
+                    self.queue[index] = Some(RTTEntry::new(seq));
+                    self.queue[index].as_mut().unwrap().update_value(rtt, delta);
                 }
             }
             None => {
-                self.queue[index] = Some(RTTEntry::new(seq, self.max_links));
-                self.queue[index].as_mut().unwrap().update_value(channel, rtt, delta);
+                self.queue[index] = Some(RTTEntry::new(seq));
+                self.queue[index].as_mut().unwrap().update_value( rtt, delta);
             }
         }
     }
 
-    fn average_between_quantiles(values: &mut Vec<f64>) -> f64 {
-        if values.is_empty() {
-            0.0
-        } else {
-            let len = values.len();
-            if len < 10 {
-                return values.iter().sum::<f64>() / len as f64;
-            }
-            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-            let pos_10 = ((len as f64) * 0.10).floor() as usize;
-            let pos_90 = ((len as f64) * 0.90).floor() as usize;
-    
-            let slice = &values[pos_10..pos_90];
-            slice.iter().sum::<f64>() / slice.len() as f64
-        }
-    }
-
-    pub fn statistic(&mut self) -> (f64, Vec<f64>, f64, Vec<f64>) {
+    pub fn statistic(&mut self) -> (f64, f64) {
         // Vectors to store RTT and channel RTT values
-        let mut rtt_values = Vec::new();
-        let mut channel_rtts = vec![Vec::new(); self.max_links];
     
         let mut outages = 0.0;
-        let mut ch_outages = vec![0; self.max_links];
-        let mut count = vec![0; self.max_links + 1];
+        let mut rtts = 0.0;
+        let mut count = 0;
     
         for entry in &mut self.queue {
             if let Some(ref mut entry) = entry {
-                for (i, rtt_opt) in entry.channel_rtts.iter().enumerate() {
-                    if let Some(rtt) = rtt_opt {
-                        if !entry.visited_rtt[i + 1] {
-                            entry.visited_rtt[i + 1] = true;
-                            channel_rtts[i].push(*rtt);
-                            if rtt > &self.target_rtt {
-                                ch_outages[i] += 1;
-                            }
-                            count[i + 1] += 1;
-                        }
-                    }
+                rtts += entry.rtt;
+                if entry.rtt > self.target_rtt {
+                    outages += (entry.rtt - self.target_rtt) / self.target_rtt;
                 }
-                if entry.completed && !entry.visited_rtt[0] {
-                    rtt_values.push(entry.rtt);
-                    if entry.rtt > self.target_rtt {
-                        outages += 1.0;
-                    }
-                    count[0] += 1;
-                    entry.visited_rtt[0] = true;
-                }
+                count += 1;
             }
         }
     
-        let rtt_avg = RttRecords::average_between_quantiles(&mut rtt_values);
+        let rtt_avg = if count == 0 { 0.0 } else { rtts / count as f64 };
     
-        let outage_rate = if count[0] == 0 {
-            0.0
-        } else {
-            outages / count[0] as f64
-        };
-    
-        let ch_outage_rates: Vec<f64> = ch_outages
-            .iter()
-            .enumerate()
-            .map(|(i, &x)| if count[i + 1] == 0 { 0.0 } else { x as f64 / count[i + 1] as f64 })
-            .collect();
-    
-        let channel_rtts_avg: Vec<f64> = channel_rtts
-            .iter_mut()
-            .map(|rtts| RttRecords::average_between_quantiles(rtts))
-            .collect();
+        let outage_rate = if count == 0 { 0.0 } else { outages / count as f64 };
 
-        (rtt_avg, channel_rtts_avg, outage_rate, ch_outage_rates)
+        (rtt_avg, outage_rate)
     }
     
 }

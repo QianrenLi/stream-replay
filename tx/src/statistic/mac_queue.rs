@@ -14,8 +14,6 @@ use crate::utils::ip_helper::{get_dev_from_ip};
 pub type MACQueueInfo = HashMap<u8, usize>;
 pub type GuardedMACMonitor = Arc<Mutex<MACQueueMonitor>>;
 
-
-
 #[derive(Debug, Clone)]
 pub struct MACQueueMonitor {
     query: HashMap<String, MACQueueQuery>,

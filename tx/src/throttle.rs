@@ -65,6 +65,7 @@ pub struct RateThrottler {
     sum_bytes: usize,
     acc_error: usize,
     max_error: usize,
+    frame_count: usize,
     //
     pub throttle: f64,
     pub last_rate:f64,
@@ -84,7 +85,7 @@ impl RateThrottler {
         // let throttle = Arc::new(Mutex::new( throttle ));
 
         Self{ name, is_log: is_log, window, buffer, throttle, last_rate:0.0,
-                sum_bytes:0, acc_error:0, max_error }
+                sum_bytes:0, acc_error:0, max_error, frame_count:0 }
     }
 
     pub fn reset(&mut self) {
@@ -125,6 +126,7 @@ impl RateThrottler {
         for packet in packets.into_iter() {
             self.buffer.try_push(packet);
         }
+        self.frame_count += 1;
     }
 
     pub fn try_consume<T>(&mut self, callback:T) -> Option<bool>
@@ -138,6 +140,9 @@ impl RateThrottler {
                 }
                 match callback(packet) {
                     true => {
+                        if packet.last_one {
+                            self.frame_count -= 1;
+                        }
                         self.consume();
                         Some(true)
                     }
@@ -182,5 +187,9 @@ impl RateThrottler {
         else {
             true
         }
+    }
+
+    pub fn snapshot(&self) -> (f64, f64, usize, usize) {
+        (self.last_rate, self.throttle, self.buffer.fifo.len(), self.frame_count)
     }
 }

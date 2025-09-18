@@ -12,10 +12,10 @@ use ndarray_npy::read_npy;
 use core::packet::*;
 use crate::conf::{StreamParam, ConnParams};
 use crate::dispatcher::dispatch;
-use crate::statistic::mac_queue::{LatestBus};
+use crate::statistic::mac_queue::{LatestBus, MACQueuesSnapshot};
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
-use crate::ipc::Statistics;
+use crate::ipc::FlowStatistics;
 use crate::policies::{PolicyParameter, SchedulingMessage};
 use crate::tx_part_ctl::TxPartCtler;
 use crate::utils::trace_reader::read_packets;
@@ -67,12 +67,11 @@ fn process_queue(
     // Precompute unix epoch once
     while SystemTime::now() < *stop_time {
         // Compute current time once per iteration
-        if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {            
+        if let Some(_) = throttler.lock().unwrap().try_consume(|mut packet| {       
             // Get IP address with minimal lock time
             match tx_part_ctler.lock() {
                 Ok(mut controller) => {
                     let mac_info = controller.mac_info_bus.latest().as_ref().to_owned();
-                    
                     let schedule_param = SchedulingMessage::new(
                         packet, 
                         SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
@@ -368,25 +367,25 @@ impl SourceManager {
         };
     }
 
-    pub fn statistics(&self) -> Option<Statistics> {
+    pub fn statistics(&self) -> Option<FlowStatistics> {
         let now = SystemTime::now();
         if now < self.start_timestamp || now > self.stop_timestamp {
             return None;
         }
     
-        let throughput = self.throttler.lock().ok()?.last_rate;
-        let throttle = self.throttler.lock().ok()?.throttle;
+        let (throughput, throttle, app_buff, frame_count) = self.throttler.lock().ok()?.snapshot();
     
-        let (rtt, channel_rtts, outage_rate, ch_outage_rates) = if let Some(ref rtt) = self.rtt {
-            let stats = rtt.rtt_records.lock().unwrap().statistic();
-            (Some(stats.0), Some(stats.1), Some(stats.2), Some(stats.3))
+        let (rtt,  outage_rate) = if let Some(ref rtt) = self.rtt {
+            rtt.rtt_records.lock().ok()?.statistic()
         } else {
-            (None, None, None, None)
+            (0.0, 0.0)
         };
         let (version, bitrate) = self.version_manager.lock().ok()?.as_ref()?.get_version_bitrate();
-        let mac_info = self.mac_info_bus.latest().as_ref().to_owned();
-    
-        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, throttle, version, bitrate, mac_info})
+        Some(FlowStatistics { rtt, outage_rate, throughput, throttle, version, bitrate, app_buff, frame_count })
+    }
+
+    pub fn device_statistics(&self) -> MACQueuesSnapshot {
+        self.mac_info_bus.latest().as_ref().to_owned()
     }
 
     pub fn start(&mut self, index:usize, tx_ipaddr:String) -> JoinHandle<()> {

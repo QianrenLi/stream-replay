@@ -45,6 +45,7 @@ pub struct PacketWithMeta {
     pub num: usize,       // number of packets in the original datagram
     pub arrival_time: f64,
     pub channel: usize,
+    pub last_one: bool,
 }
 
 impl Deref for PacketWithMeta {
@@ -67,6 +68,7 @@ impl PacketWithMeta {
             arrival_time: 0.0,
             num: 0,
             channel: 0,
+            last_one: false,
         }
     }
 
@@ -77,6 +79,11 @@ impl PacketWithMeta {
     pub fn next_seq(&mut self, num: usize) {
         self.num = num;
         self.packet.next_seq(num);
+    }
+
+    pub fn set_offset(&mut self, offset: u16) {
+        self.last_one = offset == (self.num - 1) as u16 ;
+        self.packet.set_offset(offset);
     }
 
     pub fn set_indicator(&mut self, packet_type: PacketType) {
