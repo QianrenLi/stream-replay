@@ -46,10 +46,11 @@ pub struct SchedulingMessage {
     pub current_time: f64,
     pub blocked_signals: Vec<bool>,   // Now included in SchedulingMessage
     pub ac1_info: Vec<usize>,         // Store ac1_info directly in SchedulingMessage
+    pub mcs_values: Option<Vec<f32>>, // MCS values for different access categories
 }
 
 impl SchedulingMessage {
-    pub fn new(packet: core::packet::PacketWithMeta, current_time: f64, blocked_signals: Vec<bool>, ac1_info: Vec<usize>) -> Self {
+    pub fn new(packet: core::packet::PacketWithMeta, current_time: f64, blocked_signals: Vec<bool>, ac1_info: Vec<usize>, mcs_values: Option<Vec<f32>>) -> Self {
         SchedulingMessage {
             seq: packet.seq as usize,
             arrival_time: packet.arrival_time,
@@ -58,6 +59,7 @@ impl SchedulingMessage {
             num: packet.num as usize,
             blocked_signals,
             ac1_info,
+            mcs_values,
         }
     }
 }

@@ -21,7 +21,9 @@ log = "0.4.22"
 env_logger = "0.9.0"
 flume = "0.11.0"
 regex = "1.10.5"
+
 stream-replay-core = {path="../core"}
+arc-swap = "1.7.1"
 
 [dependencies.serde]
 version = "1.0"

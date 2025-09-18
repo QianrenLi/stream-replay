@@ -1,5 +1,5 @@
 use core::packet::{PacketType};
-use crate::statistic::mac_queue::{GuardedMACMonitor};
+use crate::statistic::mac_queue::{LatestBus};
 use crate::policies::{Policy, PolicyParameter, SchedulingMessage};
 
 
@@ -9,15 +9,15 @@ pub struct TxPartCtler {
     pub blocked_signals: Vec<bool>,
     pub log_str: String,
     pub policy_parameters: PolicyParameter,
-    pub mac_monitor: GuardedMACMonitor,
+    pub mac_info_bus: LatestBus,
 }
 
 impl TxPartCtler {
-    pub fn new(policy: Policy, policy_parameters: PolicyParameter, mac_monitor: GuardedMACMonitor) -> Self {
+    pub fn new(policy: Policy, policy_parameters: PolicyParameter, mac_info_bus: LatestBus) -> Self {
         TxPartCtler {
             policy,
             blocked_signals: vec![false; 2],
-            mac_monitor,
+            mac_info_bus,
             policy_parameters,
             log_str: String::new(),
         }

@@ -1,25 +1,31 @@
 #![allow(dead_code)]
-
 use std::sync::{Arc, Mutex};
+use std::process::Command;
 use std::thread;
 use std::{fs, io};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+use arc_swap::ArcSwap;
+use serde::{Deserialize, Serialize};
+use regex::Regex;
 
 use crate::utils::ip_helper::{get_dev_from_ip};
 
 pub type MACQueueInfo = HashMap<u8, usize>;
 pub type GuardedMACMonitor = Arc<Mutex<MACQueueMonitor>>;
 
-#[derive(Debug, Clone)]
-pub struct MACQueueQuery {
-    proc_file: String,
-    queue_info: MACQueueInfo,
-}
+
 
 #[derive(Debug, Clone)]
 pub struct MACQueueMonitor {
     query: HashMap<String, MACQueueQuery>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MACQueuesSnapshot {
+    pub taken_at: SystemTime,
+    pub queues: HashMap<String, MACQueueInfo>,
+    pub link: HashMap<String, LinkInfo>,
 }
 
 fn parse_digits(s: &str, start: usize) -> Option<usize> {
@@ -44,12 +50,67 @@ fn parse_digits(s: &str, start: usize) -> Option<usize> {
     found.then_some(num)
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct LinkInfo {
+    bssid: Option<String>,
+    ssid: Option<String>,
+    freq_mhz: Option<u32>,
+    signal_dbm: Option<i32>,
+    pub tx_mbit_s: Option<f32>,
+}
+
+fn run_iw_link(iface: &str) -> Option<String> {
+    let out = Command::new("iw")
+        .arg("dev")
+        .arg(iface)
+        .arg("link")
+        .output().unwrap();
+
+    if !out.status.success() {
+        None
+    }
+    else{
+        Some(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+}
+
+fn parse_link_info(s: &str) -> LinkInfo {
+    let re_bssid = Regex::new(r"(?m)^\s*Connected to\s+([0-9a-fA-F:]{17})\b").unwrap();
+    let re_ssid  = Regex::new(r"(?m)^\s*SSID:\s*(.+)\s*$").unwrap();
+    let re_freq  = Regex::new(r"(?m)^\s*freq:\s*(\d+)\s*$").unwrap();
+    let re_sig   = Regex::new(r"(?m)^\s*signal:\s*(-?\d+)\s*dBm\b").unwrap();
+    let re_tx    = Regex::new(r"(?m)^\s*tx bitrate:\s*([0-9]+(?:\.[0-9]+)?)\s*MBit/s\b").unwrap();
+
+    let bssid = re_bssid.captures(s).map(|c| c[1].to_string());
+    let ssid  = re_ssid.captures(s).map(|c| c[1].trim().to_string());
+    let freq_mhz = re_freq
+        .captures(s)
+        .and_then(|c| c[1].parse::<u32>().ok());
+    let signal_dbm = re_sig
+        .captures(s)
+        .and_then(|c| c[1].parse::<i32>().ok());
+    let tx_mbit_s = re_tx
+        .captures(s)
+        .and_then(|c| c[1].parse::<f32>().ok());
+
+    LinkInfo { bssid, ssid, freq_mhz, signal_dbm, tx_mbit_s }
+}
+
+#[derive(Debug, Clone)]
+pub struct MACQueueQuery {
+    dev: String,
+    proc_file: String,
+    queue_info: MACQueueInfo,
+    link_info: LinkInfo,
+}
 
 impl MACQueueQuery {
     pub fn new(dev: &str) -> Self {
         Self {
+            dev: dev.to_string(),
             proc_file: format!("/proc/net/rtl88XXau/{}/mac_qinfo", dev),
             queue_info: HashMap::new(),
+            link_info: LinkInfo::default(),
         }
     }
 
@@ -101,10 +162,15 @@ impl MACQueueQuery {
         }
     }
 
+    fn update_link_info(&mut self) {
+        if let Some(output) = run_iw_link(&self.dev) {
+            self.link_info = parse_link_info(&output);
+        }
+    }
+
     pub fn get_queue_info(&mut self) -> &MACQueueInfo {
         &self.queue_info
     }
-    
 }
 
 
@@ -147,27 +213,58 @@ impl MACQueueMonitor {
     
 }
 
+#[derive(Debug, Clone)]
+pub struct LatestBus {
+    inner: Arc<ArcSwap<MACQueuesSnapshot>>,
+}
+
+impl LatestBus {
+    pub fn new() -> Self {
+        // Start with an empty snapshot if you like:
+        let init = Arc::new(MACQueuesSnapshot {
+            taken_at: std::time::SystemTime::now(),
+            queues: std::collections::HashMap::new(),
+            link: std::collections::HashMap::new(),
+        });
+        Self { inner: Arc::new(ArcSwap::from(init)) }
+    }
+
+    // Publisher: never blocks readers
+    pub fn publish(&self, snap: MACQueuesSnapshot) {
+        self.inner.store(Arc::new(snap));
+    }
+
+    // Reader: lock-free, cheap clone of Arc
+    pub fn latest(&self) -> Arc<MACQueuesSnapshot> {
+        self.inner.load_full()
+    }
+}
+
+
 pub fn mon_mac_thread(
-    mac_mon: GuardedMACMonitor,
+    mut mac_mon: MACQueueMonitor, bus: LatestBus
 ) -> thread::JoinHandle<()> {
     let mon_thread = thread::spawn(move || {
         let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
             .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
-
         loop {
-            let deadline = SystemTime::now() + Duration::from_nanos(300_000_000); // 300ms           
-            match mac_mon.lock() {
-                Ok(mut mac_mon) => {
-                    // Update the queue info for each IP
-                    mac_mon.query.iter_mut().for_each(|(_ip, query)| {
-                        query.update_queue_info();
-                    });
-                }
-                Err(e) => {
-                    eprintln!("Failed to lock MACQueueMonitor: {}", e);
-                    continue;
-                }
-            }
+            let deadline = SystemTime::now() + Duration::from_nanos(300_000_000); // 300ms    
+            let mut all: HashMap<String, MACQueueInfo> = HashMap::new();
+            let mut link: HashMap<String, LinkInfo> = HashMap::new();
+
+            mac_mon.query.iter_mut().for_each(|(ip, q)| {
+                q.update_queue_info();
+                q.update_link_info();
+                all.insert(ip.clone(), q.queue_info.clone());
+                link.insert(ip.clone(), q.link_info.clone());
+            });
+
+
+            bus.publish(MACQueuesSnapshot {
+                taken_at: SystemTime::now(),
+                queues: all,
+                link,
+            });
 
             if let Ok(remaining_time) = deadline.duration_since(SystemTime::now()) {
                 spin_sleeper.sleep(remaining_time);

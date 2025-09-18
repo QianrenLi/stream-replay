@@ -12,7 +12,7 @@ use ndarray_npy::read_npy;
 use core::packet::*;
 use crate::conf::{StreamParam, ConnParams};
 use crate::dispatcher::dispatch;
-use crate::statistic::mac_queue::GuardedMACMonitor;
+use crate::statistic::mac_queue::{LatestBus};
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::Statistics;
@@ -71,11 +71,16 @@ fn process_queue(
             // Get IP address with minimal lock time
             match tx_part_ctler.lock() {
                 Ok(mut controller) => {
+                    let mac_info = controller.mac_info_bus.latest().as_ref().to_owned();
+                    
                     let schedule_param = SchedulingMessage::new(
                         packet, 
                         SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
                         controller.blocked_signals.clone(),
-                        controller.mac_monitor.lock().unwrap().get_ac_queue(1),
+                        mac_info.queues.values()
+                        .map(|qinfo| qinfo.get(&1).cloned().unwrap_or(0))
+                        .collect(),
+                        mac_info.link.values().map(|link| link.tx_mbit_s).collect(),
                     );
                     if let Some(packet_type) = controller.get_packet_state(schedule_param){
                         packet.set_indicator(packet_type);
@@ -298,12 +303,13 @@ pub struct SourceManager{
     rtt: Option<RttRecorder>,
     tx_part_ctler: GuardedTxPartCtler,
     version_manager: GuardedVersionManager,
+    mac_info_bus: LatestBus,
     //
     socket_infos: Vec<SocketInfo>,
 }
 
 impl SourceManager {
-    pub fn new(stream: StreamParam, window_size:usize, mac_monitor: GuardedMACMonitor) -> Self {
+    pub fn new(stream: StreamParam, window_size:usize, mac_info_bus: LatestBus) -> Self {
         let (StreamParam::UDP(ref params) | StreamParam::TCP(ref params)) = stream;
         let mut name = stream.name();
 
@@ -315,7 +321,7 @@ impl SourceManager {
             RateThrottler::new(name.clone(), params.throttle, window_size, params.no_logging, false)
         ));
         let tx_part_ctler = Arc::new(Mutex::new(
-            TxPartCtler::new(params.policy, params.policy_parameters, mac_monitor)
+            TxPartCtler::new(params.policy, params.policy_parameters, mac_info_bus.clone())
         ));
         let version_manager = Arc::new(Mutex::new( 
             if params.npy_file.ends_with(".json") {
@@ -341,7 +347,7 @@ impl SourceManager {
             (vec![], vec![])
         };
 
-        Self{ name, stream, throttler, rtt, tx_part_ctler, version_manager, socket_infos, start_timestamp, stop_timestamp, source, dest }
+        Self{ name, stream, throttler, rtt, tx_part_ctler, version_manager, socket_infos, start_timestamp, stop_timestamp, source, mac_info_bus, dest }
     }
 
     pub fn throttle(&self, throttle:f64) {
@@ -377,10 +383,10 @@ impl SourceManager {
         } else {
             (None, None, None, None)
         };
-
         let (version, bitrate) = self.version_manager.lock().ok()?.as_ref()?.get_version_bitrate();
+        let mac_info = self.mac_info_bus.latest().as_ref().to_owned();
     
-        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, throttle, version, bitrate })
+        Some(Statistics { rtt, channel_rtts, outage_rate, ch_outage_rates, throughput, throttle, version, bitrate, mac_info})
     }
 
     pub fn start(&mut self, index:usize, tx_ipaddr:String) -> JoinHandle<()> {

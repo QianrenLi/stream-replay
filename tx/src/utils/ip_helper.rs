@@ -1,31 +1,32 @@
+use regex::Regex;
 use std::process::Command;
 
 pub fn get_dev_from_ip(ip: &str) -> Option<String> {
+    // One line per address → easier to parse
     let output = Command::new("ip")
+        .arg("-o")
         .arg("addr")
         .arg("show")
         .output()
         .ok()?;
 
-    let output_str = String::from_utf8_lossy(&output.stdout);
+    let s = String::from_utf8_lossy(&output.stdout);
 
-    let mut current_dev = None;
+    let re = Regex::new(r#"^\d+:\s+(\S+)\s+(inet6?|inet)\s+([0-9A-Fa-f\.:]+)(?:/\d+)"#).unwrap();
 
-    for line in output_str.lines() {
-        // Header line: "2: wlx081f7165e561: <...>"
-        if let Some(idx) = line.find(": ") {
-            let dev_part = &line[idx + 2..];
-            if let Some(end_idx) = dev_part.find(':') {
-                current_dev = Some(dev_part[..end_idx].to_string());
+    let want_v6 = ip.contains(':');
+
+    for line in s.lines() {
+        if let Some(c) = re.captures(line) {
+            let dev = &c[1];
+            let fam = &c[2]; // "inet" or "inet6"
+            let addr = &c[3];
+
+            let fam_match = (want_v6 && fam == "inet6") || (!want_v6 && fam == "inet");
+            if fam_match && addr.eq_ignore_ascii_case(ip) {
+                return Some(dev.to_string());
             }
         }
-
-        // Look for the IP address
-        if line.contains(ip) {
-            println!("Device for IP {}: {:?}", ip, current_dev);
-            return current_dev;
-        }
     }
-
     None
 }

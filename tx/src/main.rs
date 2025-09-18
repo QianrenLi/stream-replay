@@ -12,7 +12,6 @@ mod version_manager;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use log::info;
 
 use core::logger::init_log;
@@ -25,7 +24,7 @@ use serde_json;
 use crate::conf::Manifest;
 use crate::ipc::IPCDaemon;
 use crate::source::SourceManager;
-use crate::statistic::mac_queue::{mon_mac_thread, MACQueueMonitor};
+use crate::statistic::mac_queue::{mon_mac_thread, LatestBus, MACQueueMonitor};
 
 
 #[derive(Parser, Debug)]
@@ -60,11 +59,12 @@ fn main() {
     let ipc_port = manifest.ipc_port.unwrap_or(11112);
     println!("Sliding Window Size: {}.", window_size);
 
-    let mac_monitor = Arc::new(Mutex::new(MACQueueMonitor::new(&manifest.tx_ipaddrs)));
+    let mac_monitor = MACQueueMonitor::new(&manifest.tx_ipaddrs);
+    let mac_info_bus = LatestBus::new();
 
     // spawn the source thread
     let mut sources:HashMap<_,_> = streams.into_iter().map(|stream| {
-        let src = SourceManager::new(stream, window_size, Arc::clone(&mac_monitor));
+        let src = SourceManager::new(stream, window_size, mac_info_bus.clone());
         let name = src.name.clone();
         (name, src)
     }).collect();
@@ -73,7 +73,7 @@ fn main() {
     }).collect();
 
     if args.mon_mac {
-        mon_mac_thread(mac_monitor);
+        mon_mac_thread(mac_monitor, mac_info_bus);
     }
 
     // start global IPC

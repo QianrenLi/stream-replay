@@ -67,13 +67,9 @@ impl VersionManager {
     pub fn next(&mut self) -> &String{
         let slot = self.current_slot as usize;
         self.current_slot += 1;
-        self.current_version += 1;
         println!("Switching to slot {} (version {})\n", slot, self.current_version);
         if self.current_slot >= self.cfg.slots as u32 {
             self.current_slot = 0;
-        }
-        if self.current_version as usize >= self.cfg.versions.len() {
-            self.current_version = 0;
         }
         &self.cfg.versions[self.current_version as usize].files[slot].path
     }

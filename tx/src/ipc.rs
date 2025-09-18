@@ -1,6 +1,6 @@
 use std::{net::UdpSocket, collections::HashMap, time::{Duration, SystemTime}};
 use serde::{Serialize, Deserialize};
-use crate::{source::SourceManager, policies::PolicyParameter};
+use crate::{policies::PolicyParameter, source::SourceManager, statistic::mac_queue::MACQueuesSnapshot};
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct Statistics {
@@ -12,6 +12,13 @@ pub struct Statistics {
     pub throttle: f64,
     pub version: u32,
     pub bitrate: u64,
+    pub mac_info: MACQueuesSnapshot,
+}
+
+#[derive(Serialize, Deserialize, Debug,Clone)]
+pub struct ControlInfo {
+    pub version: u32,
+    pub policy_parameters: PolicyParameter,
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
@@ -19,7 +26,8 @@ enum RequestValue {
     Throttle(HashMap<String, f64>),
     PolicyParameters(HashMap<String, PolicyParameter>),
     Statistics(HashMap<String, f64>),
-    Vertion(HashMap<String, u32>),
+    Version(HashMap<String, u32>),
+    Control(HashMap<String, ControlInfo>),
 }
 
 #[derive(Serialize, Deserialize, Debug,Clone)]
@@ -54,9 +62,6 @@ impl IPCDaemon {
                 let _:Vec<_> = data.iter().map(|(name, value)| {
                     self.sources[name].throttle(*value);
                 }).collect();
-                
-                // TODO: reset RTT records for all
-                //
                 return None;
             },
 
@@ -64,15 +69,21 @@ impl IPCDaemon {
                 let _:Vec<_> = data.iter().map(|(name, value)| {
                     self.sources[name].set_policy_parameters(*value);
                 }).collect();
-                //
                 return None;
             },
 
-            RequestValue::Vertion(data) => {
+            RequestValue::Version(data) => {
                 let _:Vec<_>  = data.iter().map(|(name, value)| {
                     self.sources[name].set_version(*value);
                 }).collect();
-                //
+                return None;
+            },
+
+            RequestValue::Control(data) => {
+                let _:Vec<_> = data.iter().map(|(name, value)| {
+                    self.sources[name].set_version(value.version);
+                    self.sources[name].set_policy_parameters(value.policy_parameters);
+                }).collect();
                 return None;
             },
 
