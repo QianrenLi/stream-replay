@@ -8,7 +8,6 @@ pub struct FlowStatistics {
     pub outage_rate: f64,
     pub throughput: f64,
     pub throttle: f64,
-    pub version: u32,
     pub bitrate: u64,
     pub app_buff: usize,
     pub frame_count: usize,

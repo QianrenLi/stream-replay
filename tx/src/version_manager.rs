@@ -44,6 +44,7 @@ struct Config {
 pub struct VersionManager {
     cfg: Config,
     pub current_version: u32,
+    pub actual_bitrate: u64,
     current_bitrate: u64,
     current_slot: u32,
 }
@@ -55,11 +56,13 @@ impl VersionManager {
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
         let cfg: Config = serde_json::from_reader(reader).unwrap();
-        let bitrate = cfg.bitrates_bps[0];
+        let initial_version = 0;
+        let bitrate = cfg.bitrates_bps[initial_version];
         Self {
             cfg,
-            current_version: 0,
+            current_version: initial_version as u32,
             current_bitrate: bitrate,
+            actual_bitrate: bitrate,
             current_slot: 0,
         }
     }
@@ -71,6 +74,7 @@ impl VersionManager {
         if self.current_slot >= self.cfg.slots as u32 {
             self.current_slot = 0;
         }
+        self.actual_bitrate = self.cfg.bitrates_bps[self.current_version as usize];
         &self.cfg.versions[self.current_version as usize].files[slot].path
     }
 
@@ -85,8 +89,8 @@ impl VersionManager {
         }
     }
 
-    pub fn get_version_bitrate(&self) -> (u32, u64) {
-        (self.current_version, self.current_bitrate)
+    pub fn get_bitrate(&self) -> u64 {
+        self.current_bitrate
     }
 
 }

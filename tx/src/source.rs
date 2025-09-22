@@ -380,8 +380,8 @@ impl SourceManager {
         } else {
             (0.0, 0.0)
         };
-        let (version, bitrate) = self.version_manager.lock().ok()?.as_ref()?.get_version_bitrate();
-        Some(FlowStatistics { rtt, outage_rate, throughput, throttle, version, bitrate, app_buff, frame_count })
+        let bitrate = self.version_manager.lock().ok()?.as_ref()?.get_bitrate();
+        Some(FlowStatistics { rtt, outage_rate, throughput, throttle, bitrate, app_buff, frame_count })
     }
 
     pub fn device_statistics(&self) -> MACQueuesSnapshot {
