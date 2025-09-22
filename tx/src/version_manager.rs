@@ -90,7 +90,7 @@ impl VersionManager {
     }
 
     pub fn get_bitrate(&self) -> u64 {
-        self.current_bitrate
+        self.actual_bitrate
     }
 
 }

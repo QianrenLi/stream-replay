@@ -5,11 +5,13 @@ use core::packet::PacketType;
 mod queue_aware;
 mod conditional_rr;
 mod hard_threshold;
+mod simple_queue_aware;
 
 // Define the `Policy` enum
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum Policy {
     QueueAware,
+    SimpleQueueAware,
     ConditionalRR,
     #[default]
     HardThreshold,
@@ -26,6 +28,7 @@ impl Policy {
             Policy::QueueAware => queue_aware::get_packet_state(params, policy_parameters),
             Policy::ConditionalRR => conditional_rr::get_packet_state(params, policy_parameters),
             Policy::HardThreshold => hard_threshold::get_packet_state(params, policy_parameters),
+            Policy::SimpleQueueAware => simple_queue_aware::get_packet_state(params, policy_parameters),
         }
     }
 }
@@ -38,6 +41,7 @@ pub struct PolicyParameter {
     pub theta_4: f64,
 }
 
+#[derive(Debug)]
 pub struct SchedulingMessage {
     pub seq: usize,
     pub offset: usize,

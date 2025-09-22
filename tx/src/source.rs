@@ -6,6 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 use std::net::{UdpSocket};
 use std::vec;
+use log::info;
 use ndarray::prelude::*;
 use ndarray_npy::read_npy;
 
@@ -72,6 +73,11 @@ fn process_queue(
             match tx_part_ctler.lock() {
                 Ok(mut controller) => {
                     let mac_info = controller.mac_info_bus.latest().as_ref().to_owned();
+
+                    if mac_info.queues.is_empty() || mac_info.link.is_empty() {
+                        return false;
+                    }
+
                     let schedule_param = SchedulingMessage::new(
                         packet, 
                         SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
@@ -83,6 +89,7 @@ fn process_queue(
                     );
                     if let Some(packet_type) = controller.get_packet_state(schedule_param){
                         packet.set_indicator(packet_type);
+                        info!("{:?}, {:?}", packet.channel, packet.seq as u32);
                     } else {
                         return false;
                     }
