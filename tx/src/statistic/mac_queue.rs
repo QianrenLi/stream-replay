@@ -243,10 +243,7 @@ pub fn mon_mac_thread(
     mut mac_mon: MACQueueMonitor, bus: LatestBus
 ) -> thread::JoinHandle<()> {
     let mon_thread = thread::spawn(move || {
-        let spin_sleeper = spin_sleep::SpinSleeper::new(100_000)
-            .with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
         loop {
-            let deadline = SystemTime::now() + Duration::from_nanos(300_000_000); // 300ms    
             let mut all: HashMap<String, MACQueueInfo> = HashMap::new();
             let mut link: HashMap<String, LinkInfo> = HashMap::new();
 
@@ -263,10 +260,6 @@ pub fn mon_mac_thread(
                 queues: all,
                 link,
             });
-
-            if let Ok(remaining_time) = deadline.duration_since(SystemTime::now()) {
-                spin_sleeper.sleep(remaining_time);
-            }
         }
     });
     mon_thread

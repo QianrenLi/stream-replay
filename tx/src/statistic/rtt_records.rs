@@ -73,6 +73,7 @@ impl RttRecords {
                 }
                 count += 1;
             }
+            *entry = None;
         }
     
         let rtt_avg = if count == 0 { 0.0 } else { rtts / count as f64 };
