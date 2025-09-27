@@ -213,18 +213,19 @@ impl MACQueueMonitor {
 
 #[derive(Debug, Clone)]
 pub struct LatestBus {
+    pub is_mon: bool,
     inner: Arc<ArcSwap<MACQueuesSnapshot>>,
 }
 
 impl LatestBus {
-    pub fn new() -> Self {
+    pub fn new(is_mon: bool) -> Self {
         // Start with an empty snapshot if you like:
         let init = Arc::new(MACQueuesSnapshot {
             taken_at: std::time::SystemTime::now(),
             queues: std::collections::HashMap::new(),
             link: std::collections::HashMap::new(),
         });
-        Self { inner: Arc::new(ArcSwap::from(init)) }
+        Self { is_mon, inner: Arc::new(ArcSwap::from(init)) }
     }
 
     // Publisher: never blocks readers

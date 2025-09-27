@@ -60,7 +60,7 @@ fn main() {
     println!("Sliding Window Size: {}.", window_size);
 
     let mac_monitor = MACQueueMonitor::new(&manifest.tx_ipaddrs);
-    let mac_info_bus = LatestBus::new();
+    let mac_info_bus = LatestBus::new(args.mon_mac);
 
     // spawn the source thread
     let mut sources:HashMap<_,_> = streams.into_iter().map(|stream| {

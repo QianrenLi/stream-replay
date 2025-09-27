@@ -23,7 +23,7 @@ impl Policy {
         &self,
         params: SchedulingMessage,
         policy_parameters: &PolicyParameter,
-    ) -> Option<PacketType> {
+    ) -> PacketType {
         match self {
             Policy::QueueAware => queue_aware::get_packet_state(params, policy_parameters),
             Policy::ConditionalRR => conditional_rr::get_packet_state(params, policy_parameters),

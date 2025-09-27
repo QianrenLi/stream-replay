@@ -23,7 +23,7 @@ impl TxPartCtler {
         }
     }
 
-    pub fn get_packet_state(&mut self, params: SchedulingMessage) -> Option<PacketType> {
+    pub fn get_packet_state(&mut self, params: SchedulingMessage) -> PacketType {
         self.policy.get_packet_state(params, &self.policy_parameters)
     }
 }
