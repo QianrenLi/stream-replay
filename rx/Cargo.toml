@@ -9,6 +9,11 @@ name = "stream-replay-rx"
 [lib]
 name = "stream_replay_rx"
 
+[features]
+# No heavy deps by default. Opt in with: --features video
+default = []
+video = ["dep:opencv", "dep:ffmpeg-next"]
+
 [dependencies]
 rand = "0.8.5"
 serde_json = "1.0"
@@ -22,8 +27,8 @@ flume = "0.11.0"
 stream-replay-core = { path = "../core" }
 
 # OpenCV dependency
-opencv = { version = "0.95.0", features = ["clang-runtime"] }
-ffmpeg-next = { version = "8.0.0" }
+opencv = { version = "0.95.0", features = ["clang-runtime"], optional = true }
+ffmpeg-next = { version = "8.0.0" , optional = true }
 
 [dependencies.serde]
 version = "1.0"
