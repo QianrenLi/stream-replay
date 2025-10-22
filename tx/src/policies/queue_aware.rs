@@ -17,7 +17,7 @@ pub fn get_packet_state(params: SchedulingMessage, policy_parameters: &PolicyPar
 }
 
 fn parameterized_function(left_pkts: usize, ac1_info:Vec<usize>, policy_parameters: &PolicyParameter, mcs_values: Vec<f32>) -> bool {
-    let val1 = ((left_pkts + ac1_info[0]) as f64).powf(policy_parameters.theta_1) / (policy_parameters.theta_3 * mcs_values[0] as f64);
-    let val2 = ((left_pkts + ac1_info[1]) as f64).powf(policy_parameters.theta_2) / (policy_parameters.theta_4 * mcs_values[1] as f64);
+    let val1 = ((left_pkts + ac1_info[0]) as f64).powf(policy_parameters.theta_1) * policy_parameters.theta_3 / (mcs_values[0] as f64);
+    let val2 = ((left_pkts + ac1_info[1]) as f64).powf(policy_parameters.theta_2) * policy_parameters.theta_4 / (mcs_values[1] as f64);
     return val1 < val2;
 }
