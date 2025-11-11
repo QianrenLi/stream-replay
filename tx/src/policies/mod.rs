@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::SystemTime};
 use serde::{Deserialize, Serialize};
 use core::packet::PacketType;
 
@@ -35,26 +35,26 @@ impl Policy {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct PolicyParameter {
-    pub theta_1: f64,
-    pub theta_2: f64,
-    pub theta_3: f64,
-    pub theta_4: f64,
+    pub theta_1: f32,
+    pub theta_2: f32,
+    pub theta_3: f32,
+    pub theta_4: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SchedulingMessage {
     pub seq: usize,
     pub offset: usize,
     pub num: usize,
     pub arrival_time: f64,
-    pub current_time: f64,
+    pub current_time: SystemTime,
     pub blocked_signals: Vec<bool>,   // Now included in SchedulingMessage
     pub ac1_info: Vec<usize>,         // Store ac1_info directly in SchedulingMessage
     pub mcs_values: Option<Vec<f32>>, // MCS values for different access categories
 }
 
 impl SchedulingMessage {
-    pub fn new(packet: core::packet::PacketWithMeta, current_time: f64, blocked_signals: Vec<bool>, ac1_info: Vec<usize>, mcs_values: Option<Vec<f32>>) -> Self {
+    pub fn new(packet: core::packet::PacketWithMeta, current_time: SystemTime, blocked_signals: Vec<bool>, ac1_info: Vec<usize>, mcs_values: Option<Vec<f32>>) -> Self {
         SchedulingMessage {
             seq: packet.seq as usize,
             arrival_time: packet.arrival_time,
@@ -65,6 +65,23 @@ impl SchedulingMessage {
             ac1_info,
             mcs_values,
         }
+    }
+
+    pub fn update(&mut self, packet: core::packet::PacketWithMeta, blocked_signals: Vec<bool>) {
+        self.seq = packet.seq as usize;
+        self.arrival_time = packet.arrival_time;
+        self.offset = packet.offset as usize;
+        self.num = packet.num as usize;
+        self.blocked_signals = blocked_signals;
+    }
+
+    pub fn update_sended_counter(&mut self, packet_type: &PacketType){
+        match packet_type {
+            PacketType::FirstLink      =>  self.ac1_info[0] += 1,
+            PacketType::SecondLink      =>  self.ac1_info[1] += 1,
+            PacketType::LastPacketInFirstLink  => self.ac1_info[0] += 1,
+            PacketType::LastPacketInSecondLink  =>  self.ac1_info[1] += 1,
+        };
     }
 }
 

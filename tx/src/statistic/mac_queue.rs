@@ -4,7 +4,7 @@ use std::process::Command;
 use std::thread;
 use std::{fs, io};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::{SystemTime};
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 use regex::Regex;

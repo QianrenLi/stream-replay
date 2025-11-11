@@ -17,7 +17,7 @@ use crate::statistic::mac_queue::{LatestBus, MACQueuesSnapshot};
 use crate::throttle::RateThrottler;
 use crate::rtt::{RttRecorder,RttSender};
 use crate::ipc::FlowStatistics;
-use crate::policies::{PolicyParameter, SchedulingMessage};
+use crate::policies::{PolicyParameter};
 use crate::tx_part_ctl::TxPartCtler;
 use crate::utils::trace_reader::read_packets;
 use crate::version_manager::VersionManager;
@@ -72,21 +72,15 @@ fn process_queue(
             // Get IP address with minimal lock time
             match tx_part_ctler.lock() {
                 Ok(mut controller) => {
-                    let mac_info = controller.mac_info_bus.latest().as_ref().to_owned();
-                    if controller.mac_info_bus.is_mon && ( mac_info.queues.is_empty() || mac_info.link.is_empty() ) {
-                        return false;
+                    match controller.determine_schedule_info(packet) {
+                        Some(params) => {
+                            let packet_type = controller.get_packet_state(params);
+                            packet.set_indicator(packet_type);
+                        }
+                        None => {
+                            return false;
+                        }
                     }
-                    let schedule_param = SchedulingMessage::new(
-                        packet, 
-                        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64(),
-                        controller.blocked_signals.clone(),
-                        mac_info.queues.values()
-                        .map(|qinfo| qinfo.get(&1).cloned().unwrap_or(0))
-                        .collect(),
-                        mac_info.link.values().map(|link| link.tx_mbit_s).collect(),
-                    );
-                    let packet_type = controller.get_packet_state(schedule_param);
-                    packet.set_indicator(packet_type);
                     info!("{:?}, {:?}", packet.channel, packet.seq as u32);
                 },
                 Err(_) => return false,
