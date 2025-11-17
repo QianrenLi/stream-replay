@@ -81,7 +81,9 @@ fn process_queue(
                             return false;
                         }
                     }
-                    info!("{:?}, {:?}", packet.channel, packet.seq as u32);
+                    if controller.mac_info_bus.is_mon {
+                        info!("{:?}, {:?}", packet.channel, packet.seq as u32);
+                    }
                 },
                 Err(_) => return false,
             };

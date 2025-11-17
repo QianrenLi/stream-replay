@@ -27,10 +27,12 @@ impl TxPartCtler {
 
     pub fn get_packet_state(&mut self, params: SchedulingMessage) -> PacketType {
         let packet_type = self.policy.get_packet_state(params, &self.policy_parameters);
-        if let Some(ref mut sm) = self.schedule_message {
-            sm.update_sended_counter(&packet_type);
-        }
-        return packet_type;
+        self.schedule_message
+        .as_mut()
+        .filter(|_| self.mac_info_bus.is_mon)
+        .map(|sm| sm.update_sended_counter(&packet_type));
+
+        packet_type
     }
 
     pub fn determine_schedule_info(&mut self, packet: core::packet::PacketWithMeta) -> Option<SchedulingMessage>{

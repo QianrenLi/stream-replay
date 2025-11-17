@@ -56,7 +56,7 @@ impl VersionManager {
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
         let cfg: Config = serde_json::from_reader(reader).unwrap();
-        let initial_version = 0;
+        let initial_version = 10;
         let bitrate = cfg.bitrates_bps[initial_version];
         Self {
             cfg,
