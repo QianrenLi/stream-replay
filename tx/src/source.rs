@@ -15,7 +15,7 @@ use crate::conf::{StreamParam, ConnParams};
 use crate::dispatcher::dispatch;
 use crate::statistic::mac_queue::{LatestBus, MACQueuesSnapshot};
 use crate::throttle::RateThrottler;
-use crate::rtt::{RttRecorder,RttSender};
+use crate::rtt::{RttRecorder, GuardedRttRecords, now_secs_f64};
 use crate::ipc::FlowStatistics;
 use crate::policies::{PolicyParameter};
 use crate::tx_part_ctl::TxPartCtler;
@@ -127,7 +127,7 @@ fn process_queue(
 pub fn stream_thread(
     throttler: GuardedThrottler, 
     tx_part_ctler: GuardedTxPartCtler, 
-    rtt_tx: Option<RttSender>, 
+    rtt_rec: Option<GuardedRttRecords>,   // ← new
     params: ConnParams, 
     socket_infos: SocketInfo, 
     dest: BufferReceiver,
@@ -150,8 +150,10 @@ pub fn stream_thread(
         throttler.lock().unwrap().prepare(packets);
 
         // Report RTT
-        if let Some(ref r_tx) = rtt_tx {
-            r_tx.send(template.seq).unwrap();
+        if let Some(ref rec) = rtt_rec {
+            if let Ok(mut r) = rec.lock() {
+                r.update_arrival(template.seq as usize, now_secs_f64());
+            }
         }
 
         // Process queue
@@ -166,7 +168,7 @@ pub fn video_thread(
     throttler: GuardedThrottler, 
     tx_part_ctler: GuardedTxPartCtler, 
     version_manager: GuardedVersionManager,
-    rtt_tx: Option<RttSender>, 
+    rtt_rec: Option<GuardedRttRecords>,   // ← was Option<RttSender>
     params: ConnParams, 
     socket_infos: SocketInfo
 ) {
@@ -207,8 +209,10 @@ pub fn video_thread(
             throttler.lock().unwrap().prepare(packets);
 
             // Report RTT
-            if let Some(ref r_tx) = rtt_tx {
-                r_tx.send(template.seq).unwrap();
+            if let Some(ref rec) = rtt_rec {
+                if let Ok(mut r) = rec.lock() {
+                    r.update_arrival(template.seq as usize, now_secs_f64());
+                }
             }
 
             SystemTime::now() + Duration::from_nanos(interval_ns)
@@ -230,7 +234,7 @@ pub fn video_thread(
 pub fn source_thread(
     throttler: GuardedThrottler, 
     tx_part_ctler: GuardedTxPartCtler, 
-    rtt_tx: Option<RttSender>, 
+    rtt_rec: Option<GuardedRttRecords>,   // ← was Option<RttSender>
     params: ConnParams, 
     socket_infos: SocketInfo
 ) {
@@ -263,8 +267,10 @@ pub fn source_thread(
             throttler.lock().unwrap().prepare(packets);
 
             // Report RTT
-            if let Some(ref r_tx) = rtt_tx {
-                r_tx.send(template.seq).unwrap();
+            if let Some(ref rec) = rtt_rec {
+                if let Ok(mut r) = rec.lock() {
+                    r.update_arrival(template.seq as usize, now_secs_f64());
+                }
             }
 
             // Next iteration
@@ -391,10 +397,14 @@ impl SourceManager {
         let tx_part_ctler = Arc::clone(&self.tx_part_ctler);
         let version_manager = Arc::clone(&self.version_manager);
 
-        let rtt_tx = match self.rtt {
-            Some(ref mut rtt) => Some( rtt.start(tx_ipaddr) ),
+        let rtt_rec = match self.rtt {
+            Some(ref mut rtt) => {
+                rtt.start(tx_ipaddr.clone());                 // launch RX thread
+                Some(Arc::clone(&rtt.rtt_records))            // hand threads the shared records
+            }
             None => None
         };
+
         let (StreamParam::UDP(ref params) | StreamParam::TCP(ref params)) = self.stream;
         let params = params.clone();
 
@@ -407,13 +417,13 @@ impl SourceManager {
         let source = thread::spawn(move || {
             if params.npy_file.starts_with(STREAM_PROTO) {
                 let dest = dest.unwrap();
-                stream_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos, dest)
+                stream_thread(throttler, tx_part_ctler, rtt_rec, params, socket_infos, dest)
             }
             else if params.npy_file.ends_with(".npy") {
-                source_thread(throttler, tx_part_ctler, rtt_tx, params, socket_infos); 
+                source_thread(throttler, tx_part_ctler, rtt_rec, params, socket_infos); 
             }
             else {
-                video_thread(throttler, tx_part_ctler, version_manager, rtt_tx, params, socket_infos);
+                video_thread(throttler, tx_part_ctler, version_manager, rtt_rec, params, socket_infos);
             }
         });
 

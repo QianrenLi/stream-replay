@@ -1,23 +1,31 @@
+use std::time::SystemTime;
+
 // use std::cmp::Ordering;
 #[derive(Debug, Clone)]
 struct RTTEntry {
     seq: usize,
-    rtt: f64,
+    // rtt: f64,
+    arrival_time: f64,
+    last_outage_time: f64,
+    pong_time: Option<f64>,
     delta: f64,
 }
 
 impl RTTEntry {
-    fn new(seq: usize) -> Self {
+    fn new(seq: usize, arrival_time: f64, last_outage_time: f64) -> Self {
         RTTEntry {
             seq,
-            rtt: 0.0,
+            arrival_time: arrival_time,
+            last_outage_time: last_outage_time,
+            pong_time: None,
             delta: 0.0,
         }
     }
 
-    fn update_value(&mut self, value: f64, delta : f64) {
-        self.rtt = value;
+    fn update_value(&mut self, value: f64, delta : f64) -> f64 {
+        self.pong_time = Some(value);
         self.delta = delta;
+        return value - self.arrival_time;
     }
 }
 
@@ -25,35 +33,34 @@ pub struct RttRecords {
     queue: Vec<Option<RTTEntry>>,
     target_rtt: f64,
     max_length: usize,
-    max_links: usize,
 }
 
 impl RttRecords {
-    pub fn new(max_length: usize, max_links: usize, target_rtt: f64) -> Self {
+    pub fn new(max_length: usize, target_rtt: f64) -> Self {
         RttRecords {
             queue: vec![None; max_length],
             target_rtt,
             max_length,
-            max_links,
         }
     }
 
-    pub fn update(&mut self, seq: usize, channel: u8, rtt: f64, delta: f64) {
+    pub fn update_arrival(&mut self, seq: usize, arrival_time: f64){
         let index = seq % self.max_length;
-        // If the entry is already present and seq value is the same, update the value
-        // Otherwise, create a new entry
+        self.queue[index] = Some(RTTEntry::new(seq, arrival_time, arrival_time + self.target_rtt));
+    }
+
+    pub fn update(&mut self, seq: usize, rtt: f64, delta: f64) -> f64 {
+        let index = seq % self.max_length;
         match &mut self.queue[index] {
             Some(entry) => {
                 if entry.seq == seq {
-                    entry.update_value(rtt, delta);
+                    return entry.update_value(rtt, delta);
                 } else {
-                    self.queue[index] = Some(RTTEntry::new(seq));
-                    self.queue[index].as_mut().unwrap().update_value(rtt, delta);
+                    panic!();
                 }
             }
             None => {
-                self.queue[index] = Some(RTTEntry::new(seq));
-                self.queue[index].as_mut().unwrap().update_value( rtt, delta);
+                panic!();
             }
         }
     }
@@ -64,21 +71,32 @@ impl RttRecords {
         let mut outages = 0.0;
         let mut rtts = 0.0;
         let mut count = 0;
-    
-        for entry in &mut self.queue {
-            if let Some(ref mut entry) = entry {
-                rtts += entry.rtt;
-                if entry.rtt > self.target_rtt {
-                    outages += (entry.rtt - self.target_rtt) / self.target_rtt;
+        let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
+
+        for slot in &mut self.queue {
+            if let Some(ref mut entry) = slot {
+                if let Some(pong_time) = entry.pong_time {
+                    rtts += pong_time - entry.arrival_time;
+                    count += 1;
+                    if pong_time > entry.last_outage_time {
+                        outages += pong_time - entry.last_outage_time;
+                        entry.last_outage_time = pong_time;
+                    }
+                    *slot = None;
                 }
-                count += 1;
+                else {
+                    if current_time > entry.last_outage_time {
+                        outages += current_time - entry.last_outage_time;
+                        entry.last_outage_time = current_time;
+                    }
+                }
             }
-            *entry = None;
+            
         }
     
         let rtt_avg = if count == 0 { 0.0 } else { rtts / count as f64 };
     
-        let outage_rate = if count == 0 { 0.0 } else { outages / count as f64 };
+        let outage_rate =  outages / self.target_rtt;
 
         (rtt_avg, outage_rate)
     }
